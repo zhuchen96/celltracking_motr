@@ -7,12 +7,16 @@ import utils_coco as utils
 import re
 from skimage.measure import label
 
-dataset = 'DynamicNuclearNet-tracking-v1_0' # ['moma','DynamicNuclearNet-tracking-v1_0']
-datapath = Path('/projectnb/dunlop/ooconnor/MOT/data') / dataset / 'COCO'
+dataset = 'sim' # ['moma','DynamicNuclearNet-tracking-v1_0']
+datapath = Path('/srv/home/chen/Cell-TRACTR/data') / dataset / 'COCO'
 
 if dataset == 'moma':
     min_area = 0
     target_size = (256,32)
+    resize = True
+elif dataset == 'sim':
+    min_area = 0
+    target_size = (512,512)
     resize = True
 else:
     min_area = 0

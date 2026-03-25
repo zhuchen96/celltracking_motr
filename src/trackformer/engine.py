@@ -285,7 +285,7 @@ class pipeline():
 
     def split_up_divided_cells(self):
 
-        self.div_track = -1 * np.ones((len(self.all_indices) + len(self.div_indices)),dtype=np.uint16) # keeps track of which cells were the result of cell division
+        self.div_track = -1 * np.ones((len(self.all_indices) + len(self.div_indices)), dtype=np.int32) # keeps track of which cells were the result of cell division
         nb_divs = 0
         for div_ind in self.div_indices:
             ind = np.where(self.all_indices==div_ind)[0][0]
@@ -442,7 +442,7 @@ class pipeline():
         self.all_indices = None
         self.track_indices = None
         self.object_indices = None
-        self.div_track = -1 * np.ones(len(self.cells),dtype=np.uint16)
+        self.div_track = -1 * np.ones(len(self.cells), dtype=np.int32)
         self.new_cells = None
 
     def forward(self):
@@ -862,22 +862,24 @@ class pipeline():
 
         for enc_map in self.enc_map:
 
-            enc_map = cv2.resize(enc_map,(self.target_size[1],self.target_size[0]),interpolation=cv2.INTER_NEAREST)
-            enc_map = np.repeat(enc_map[:,:,None],3,-1)
-            max_value = max(max_value,np.max(enc_map))
+            enc_map = cv2.resize(enc_map, (self.target_size[1], self.target_size[0]), interpolation=cv2.INTER_NEAREST)
+            enc_map = np.repeat(enc_map[:, :, None], 3, -1).astype(np.float32)
+            max_value = max(max_value, np.max(enc_map))
             enc_maps.append(enc_map)
-            border = np.zeros((self.target_size[0],spacer,3),dtype=np.uint8)
-            border[:,:,0] = -1
+
+            border = np.zeros((self.target_size[0], spacer, 3), dtype=np.float32)
+            border[:, :, 0] = 255
             enc_maps.append(border)
 
-        enc_maps = np.concatenate((enc_maps),axis=1)
+        enc_maps = np.concatenate(enc_maps, axis=1)
 
-        enc_maps[enc_maps!=-1] = (enc_maps[enc_maps!=-1] / max_value) * 255
-        enc_maps[enc_maps==-1] = 255
-        enc_maps = enc_maps[:,:-spacer]
+        if max_value > 0:
+            enc_maps = (enc_maps / max_value) * 255
 
-        enc_maps = np.concatenate((enc_maps[:,self.target_size[1]:self.target_size[1]+spacer],enc_maps),axis=1)
+        enc_maps = np.clip(enc_maps, 0, 255)
+        enc_maps = enc_maps[:, :-spacer]
 
+        enc_maps = np.concatenate((enc_maps[:, self.target_size[1]:self.target_size[1]+spacer], enc_maps), axis=1)
         if not last:
             cv2.imwrite(str(self.output_dir / self.data_viz_folder / 'enc_queries_picked.png'),enc_maps.astype(np.uint8))
         else:

@@ -28,7 +28,7 @@ at::Tensor ms_deform_attn_cuda_forward(
 {
     AT_ASSERTM(value.is_contiguous(), "value tensor has to be contiguous");
 
-    AT_ASSERTM(value.type().is_cuda(), "value must be a CUDA tensor");
+    AT_ASSERTM(value.is_cuda(), "value must be a CUDA tensor");
     AT_ASSERTM(spatial_shapes.type().is_cuda(), "spatial_shapes must be a CUDA tensor");
     AT_ASSERTM(sampling_loc.type().is_cuda(), "sampling_loc must be a CUDA tensor");
     AT_ASSERTM(attn_weight.type().is_cuda(), "attn_weight must be a CUDA tensor");
@@ -66,7 +66,7 @@ at::Tensor ms_deform_attn_cuda_forward(
     for (int n = 0; n < batch/im2col_step_; ++n)
     {
         auto columns = at::empty({num_levels*num_point, batch_n, num_query, num_heads, channels}, value.options());
-        AT_DISPATCH_FLOATING_TYPES(value.type(), "ms_deform_attn_forward_cuda", ([&] {
+        AT_DISPATCH_FLOATING_TYPES(value.scalar_type(), "ms_deform_attn_forward_cuda", ([&] {
             ms_deformable_im2col_cuda(at::cuda::getCurrentCUDAStream(),
                 value.data<scalar_t>() + n * im2col_step_ * per_value_size,
                 spatial_shapes.data<int64_t>(),
@@ -97,7 +97,7 @@ std::vector<at::Tensor> ms_deform_attn_cuda_backward(
 
     AT_ASSERTM(value.is_contiguous(), "value tensor has to be contiguous");
 
-    AT_ASSERTM(value.type().is_cuda(), "value must be a CUDA tensor");
+    AT_ASSERTM(value.is_cuda(), "value must be a CUDA tensor");
     AT_ASSERTM(spatial_shapes.type().is_cuda(), "spatial_shapes must be a CUDA tensor");
     AT_ASSERTM(sampling_loc.type().is_cuda(), "sampling_loc must be a CUDA tensor");
     AT_ASSERTM(attn_weight.type().is_cuda(), "attn_weight must be a CUDA tensor");
@@ -136,7 +136,7 @@ std::vector<at::Tensor> ms_deform_attn_cuda_backward(
     for (int n = 0; n < batch/im2col_step_; ++n)
     {
         auto grad_output_g = grad_output_n.select(0, n);
-        AT_DISPATCH_FLOATING_TYPES(value.type(), "deform_conv_backward_cuda", ([&] {
+        AT_DISPATCH_FLOATING_TYPES(value.scalar_type(), "deform_conv_backward_cuda", ([&] {
 
             // gradient w.r.t. sampling location & attention weight
             ms_deformable_col2im_coord_cuda(at::cuda::getCurrentCUDAStream(),

@@ -1,5 +1,5 @@
 tracking: true
-freeze_backbone: False
+freeze_backbone: false
 freeze_backbone_and_encoder: False
 lr: 0.0002
 lr_backbone_names: ['backbone.0']
@@ -9,13 +9,13 @@ lr_linear_proj_mult: 0.1
 lr_track: 0.0001
 overwrite_lrs: false
 overwrite_lr_scheduler: false
-batch_size: 2
+batch_size: 1
 weight_decay: 0.0001
-epochs: 12
-lr_drop: 11
-target_size: (256,32)
+epochs: 50
+lr_drop: 20
+target_size: (512,512)
 # Number of object queries
-num_queries: 30
+num_queries: 200
 # Flexible divisions
 flex_div: false
 # Tracking 2 sequential frames - use prev_prev, prev and cur frame (detection 1 frame and track for 2 frames - 3 frames total)
@@ -23,7 +23,7 @@ use_prev_prev_frame: true
 # For 2D data, image will be randomly cropped around objects
 crop: false
 # Shift only applies to cropped images. Crop will be shifted between sequential frames
-shift: false
+shift: True
 # gradient clipping max norm
 clip_max_norm: 0.1
 # Deformable DETR parameters
@@ -37,8 +37,8 @@ enc_n_points: 4
 freeze_detr: false
 load_mask_head_from_model: null
 # Backbone
-# Name of the convolutional backbone to use. ('resnet18, resnet34, resnet50', 'resnet101')
-backbone: resnet18
+# Name of the convolutional backbone to use. ('resnet50', 'resnet101')
+backbone: resnet50
 # If true, we replace stride with dilation in the last convolutional block (DC5)
 dilation: false
 # Type of positional embedding to use on top of the image features. ('sine', 'learned')
@@ -55,7 +55,7 @@ num_OD_layers: 1
 # Intermediate size of the feedforward layers in the transformer blocks
 dim_feedforward: 512
 # Size of the embeddings (dimension of the transformer)
-hidden_dim: 144 # needs to be divisible by 8
+hidden_dim: 144
 # Dropout applied in the transformer
 dropout: 0.1
 # Number of attention heads inside the transformer's attentions
@@ -63,7 +63,7 @@ nheads: 8
 # DAB-DETR 4D coordinates instead of 2D
 use_dab: true
 # DN-DETR denoising parameters
-# Denoised tracking queries
+# Denoised tracking queriesdn_track: true
 dn_track: true
 dn_track_l1: 0.2
 dn_track_l2: 0.1
@@ -107,22 +107,22 @@ overflow_boxes: true
 masks: true
 mask_dim: 288
 enc_masks: true
-use_img_for_mask: true
+use_img_for_mask: false
 # Matcher - matching cost
 set_cost_class: 4.0
 set_cost_bbox: 5.0
 set_cost_giou: 2.0
 set_cost_mask: 5.0
-set_cost_dice: 5.0
+set_cost_dice: 2.0
 # Use masks in matching - more expensive computational
 match_masks: true
 # num of points to use when matching - reduces computational load
 num_points: 10000
 # Loss
-# Backpropagate for every aux layer
+# Disables auxiliary decoding losses (loss at each layer)
 aux_loss: true
 # Backpropagate for mask at every aux layer (can create OOM issues)
-return_intermediate_masks: true
+return_intermediate_masks: false
 # Loss coefficients
 loss_coef: 1.0 # This is just a formality
 cls_loss_coef: 4.0 
@@ -147,12 +147,12 @@ focal_loss: true
 focal_alpha: 0.25
 focal_gamma: 2
 # Dataset
-dataset: moma
+dataset: sim
 # Number of plots
 num_plots: 10
 # Miscellaneous
 # path where to save, empty for no saving
-output_dir: /srv/home/chen/Cell-TRACTR/results/moma
+output_dir: /srv/home/chen/Cell-TRACTR/results/sim
 data_dir: /srv/home/chen/Cell-TRACTR/data
 # device to use for training / testing
 device: cuda
@@ -168,7 +168,7 @@ num_workers: 0
 val_interval: 5
 debug: false
 # epoch interval for model saving. if 0 only save last and best models
-save_model_interval: false
+save_model_interval: 5
 # distributed training parameters
 # number of distributed processes
 world_size: 1
@@ -177,7 +177,7 @@ dist_url: env://
 cls_threshold: 0.5
 iou_threshold: 0.5
 # Data Viz
-data_viz: False
+data_viz: false
 # Data Viz - show all 
 display_all: False
 hooks: False

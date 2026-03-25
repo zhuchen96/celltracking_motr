@@ -32,6 +32,13 @@ def get_info(dataset):
             'version': '1.0',
             'year': '2024'
             }
+    elif dataset == 'sim':
+        info = {
+            'contributor': 'NA',
+            'paper':'NA',
+            'version': 'NA',
+            'year': 'NA'
+            }
         
     return info
 

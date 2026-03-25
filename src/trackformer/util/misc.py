@@ -1047,7 +1047,7 @@ def load_model(model_without_ddp,args,param_dicts=None,optimizer=None,lr_schedul
         checkpoint = torch.hub.load_state_dict_from_url(
             args.resume, map_location='cpu', check_hash=True)
     else:
-        checkpoint = torch.load(args.resume, map_location='cpu')
+        checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
 
     model_state_dict = model_without_ddp.state_dict()
     checkpoint_state_dict = checkpoint['model']
