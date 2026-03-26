@@ -117,8 +117,8 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     args = ex.run_commandline().config
 
-    res_name = "sim"
-    dataset = "sim"
+    res_name = "moma"
+    dataset = "moma"
     respath = filepath.parents[1] / 'results' / res_name
 
     ex.add_config(str(respath / 'config.yaml'))

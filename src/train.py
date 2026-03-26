@@ -217,7 +217,7 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     # Parse the dataset from the command line
     args = ex.run_commandline().config
-    dataset = 'sim'
+    dataset = 'moma'
 
     respath = filepath.parents[1] / 'results' / dataset
 

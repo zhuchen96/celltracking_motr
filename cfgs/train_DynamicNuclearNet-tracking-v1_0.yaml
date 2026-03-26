@@ -182,3 +182,6 @@ data_viz: false
 display_all: False
 hooks: False
 avg_attn_weight_maps: True
+# MOTR-style Query Interaction Module
+use_qim: true
+num_qim_layers: 1

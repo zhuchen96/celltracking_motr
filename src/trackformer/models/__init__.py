@@ -95,7 +95,9 @@ def build_model(args):
             'avg_attn_weight_maps': args.avg_attn_weight_maps,
             'use_img_for_mask': args.use_img_for_mask,
             'num_OD_layers': args.num_OD_layers,
-            'use_div_box_as_ref_pts': args.use_div_box_as_ref_pts}
+            'use_div_box_as_ref_pts': args.use_div_box_as_ref_pts,
+            'use_qim': args.use_qim,
+            'num_qim_layers': args.num_qim_layers,}
 
         if args.tracking:
             if args.masks:

@@ -32,7 +32,8 @@ class DeformableTransformer(nn.Module):
                  init_enc_queries_embeddings=False,device='cuda',masks=False,
                  dn_enc_l1=0, dn_enc_l2=0, init_boxes_from_masks=False,
                  enc_masks=False,enc_FN=0,avg_attn_weight_maps=True,
-                 tgt_noise=1e-6,use_img_for_mask=False, num_OD_layers=0,use_div_box_as_ref_pts=False):
+                 tgt_noise=1e-6,use_img_for_mask=False, num_OD_layers=0,use_div_box_as_ref_pts=False,
+                 use_qim=False, num_qim_layers=1):
         super().__init__()
 
         self.d_model = d_model
@@ -62,6 +63,18 @@ class DeformableTransformer(nn.Module):
         
         if self.refine_track_queries:
             self.track_embedding = nn.Embedding(1,self.d_model)
+
+        self.use_qim = use_qim
+        if self.use_qim:
+            self.qim = QueryInteractionModule(
+                d_model=d_model,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                n_levels=num_feature_levels,
+                n_points=dec_n_points,
+                num_layers=num_qim_layers,
+            )
 
         if self.refine_div_track_queries:
             self.div_track_embedding = nn.Embedding(2,self.d_model)
@@ -364,6 +377,18 @@ class DeformableTransformer(nn.Module):
             if self.refine_track_queries:
                 prev_hs_embed += self.track_embedding.weight
 
+            # MOTR: refine track queries by cross-attending to current-frame encoder memory
+            if self.use_qim and prev_hs_embed.shape[1] > 0:
+                prev_hs_embed = self.qim(
+                    prev_hs_embed,
+                    prev_boxes[..., :4],
+                    memory,
+                    spatial_shapes,
+                    valid_ratios,
+                    level_start_index,
+                    mask_flatten,
+                )
+
             if not self.use_dab:
                 prev_query_embed = torch.zeros_like(prev_hs_embed)
                 query_embed = torch.cat([prev_query_embed, query_embed], dim=1)
@@ -418,6 +443,18 @@ class DeformableTransformer(nn.Module):
 
                     prev_hs_embed_dn_track_group = torch.stack([t['dn_track_group'][output_target]['track_query_hs_embeds'] for t in targets])
                     prev_boxes_dn_track_group = torch.stack([t['dn_track_group'][output_target]['track_query_boxes'] for t in targets])
+
+                    # MOTR: refine dn_track_group queries (real hs embeds) via QIM
+                    if self.use_qim and prev_hs_embed_dn_track_group.shape[1] > 0:
+                        prev_hs_embed_dn_track_group = self.qim(
+                            prev_hs_embed_dn_track_group,
+                            prev_boxes_dn_track_group[..., :4],
+                            memory,
+                            spatial_shapes,
+                            valid_ratios,
+                            level_start_index,
+                            mask_flatten,
+                        )
 
                     if not self.use_dab:
                         prev_hs_embed_dn_track_group = torch.zeros_like(prev_hs_embed_dn_track_group)
@@ -767,8 +804,85 @@ class DeformableTransformerDecoder(nn.Module):
         
         return output[None], reference_points[None], cls[None], bboxes[None]
 
+class QueryInteractionLayer(nn.Module):
+    """Single layer of MOTR's Query Interaction Module.
+
+    Refines track-query content embeddings by:
+      1. self-attention among track queries
+      2. deformable cross-attention with the current-frame encoder memory
+      3. feed-forward network
+    """
+
+    def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        self.dropout1 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+
+        self.cross_attn = MSDeformAttn(d_model, n_levels, nhead, n_points)
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(d_model)
+
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.activation = nn.ReLU()
+        self.dropout3 = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.dropout4 = nn.Dropout(dropout)
+        self.norm3 = nn.LayerNorm(d_model)
+
+    def forward(self, tgt, reference_points, memory, spatial_shapes, level_start_index, memory_padding_mask=None):
+        # self-attention
+        tgt2, _ = self.self_attn(tgt, tgt, tgt)
+        tgt = tgt + self.dropout1(tgt2)
+        tgt = self.norm1(tgt)
+        # cross-attention with encoder memory
+        tgt2 = self.cross_attn(tgt, reference_points, memory, spatial_shapes, level_start_index, memory_padding_mask)
+        tgt = tgt + self.dropout2(tgt2)
+        tgt = self.norm2(tgt)
+        # ffn
+        tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
+        tgt = tgt + self.dropout4(tgt2)
+        tgt = self.norm3(tgt)
+        return tgt
+
+
+class QueryInteractionModule(nn.Module):
+    """MOTR-style Query Interaction Module (QIM).
+
+    Applied to track queries from the previous frame before they enter the main
+    decoder.  The QIM refines the track-query content embeddings by attending to
+    the current frame's encoder memory, giving each track query a head-start
+    that is aware of where the cell currently is — the key architectural
+    difference between MOTR and TrackFormer.
+    """
+
+    def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points, num_layers):
+        super().__init__()
+        layer = QueryInteractionLayer(d_model, nhead, dim_feedforward, dropout, n_levels, n_points)
+        self.layers = _get_clones(layer, num_layers)
+
+    def forward(self, tgt, reference_points, memory, spatial_shapes, valid_ratios, level_start_index, memory_padding_mask=None):
+        """
+        Args:
+            tgt: track query content embeddings  [B, N_track, d_model]
+            reference_points: box coordinates    [B, N_track, 4]  (cx,cy,w,h normalised)
+            memory: encoder output               [B, HW, d_model]
+            ...
+        Returns:
+            refined tgt of same shape
+        """
+        output = tgt
+        for layer in self.layers:
+            if reference_points.shape[-1] == 4:
+                ref_pts = reference_points[:, :, None] * torch.cat([valid_ratios, valid_ratios], -1)[:, None]
+            else:
+                ref_pts = reference_points[:, :, None] * valid_ratios[:, None]
+            output = layer(output, ref_pts, memory, spatial_shapes, level_start_index, memory_padding_mask)
+        return output
+
+
 class MLP(nn.Module):
-    """ 
+    """
         Adapted from DAB-DETR
         Very simple multi-layer perceptron (also called FFN)"""
 
