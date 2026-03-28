@@ -217,6 +217,54 @@ class SetCriterion(nn.Module):
 
         return losses
  
+    def loss_contrastive(self, outputs, targets, training_method, target_name, indices, num_boxes):
+        """NT-Xent contrastive loss between prev-frame and cur-frame track embeddings.
+
+        For each true-positive track query, the prev-frame hs_embed (anchor) should be
+        pulled towards the cur-frame hs_embed (positive) and pushed away from other tracks.
+        Only computed for the 'main' method where embeddings are meaningful.
+        """
+        if training_method != 'main' or 'hs_embed' not in outputs:
+            return {training_method + '_loss_contrastive': torch.tensor(0., device=self.device)}
+
+        hs = outputs['hs_embed']   # [B, N_track+N_obj, D]
+        temperature = 0.1
+        all_anchors, all_positives = [], []
+
+        for i, target in enumerate(targets):
+            tgt = target[training_method][target_name]
+            if tgt.get('empty', False):
+                continue
+            if 'track_query_hs_embeds' not in tgt or 'track_queries_TP_mask' not in tgt:
+                continue
+
+            n_track = tgt['track_query_hs_embeds'].shape[0]
+            tp_track_mask = tgt['track_queries_TP_mask'][:n_track]   # [N_track]
+            if tp_track_mask.sum() == 0:
+                continue
+
+            tp_idx = tp_track_mask.nonzero(as_tuple=True)[0]
+            # detach anchors: gradients flow only through the current-frame positives
+            all_anchors.append(tgt['track_query_hs_embeds'][tp_track_mask].detach())
+            all_positives.append(hs[i, tp_idx])
+
+        if len(all_anchors) == 0:
+            return {training_method + '_loss_contrastive': torch.tensor(0., device=self.device)}
+
+        anchors   = F.normalize(torch.cat(all_anchors,   dim=0), dim=-1)  # [N, D]
+        positives = F.normalize(torch.cat(all_positives, dim=0), dim=-1)  # [N, D]
+        N = anchors.shape[0]
+
+        if N < 2:
+            return {training_method + '_loss_contrastive': torch.tensor(0., device=self.device)}
+
+        # logits[i, j] = cosine similarity between anchor i and positive j
+        logits = torch.mm(anchors, positives.t()) / temperature   # [N, N]
+        labels = torch.arange(N, device=self.device)
+        loss = F.cross_entropy(logits, labels)
+
+        return {training_method + '_loss_contrastive': loss}
+
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -234,6 +282,7 @@ class SetCriterion(nn.Module):
             'labels': self.loss_labels_focal if self.focal_loss else self.loss_labels,
             'boxes': self.loss_boxes,
             'masks': self.loss_masks,
+            'contrastive': self.loss_contrastive,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
 

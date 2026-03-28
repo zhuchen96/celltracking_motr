@@ -968,6 +968,9 @@ def split_outputs(outputs,target_TM):
     if 'pred_masks' in outputs:
         new_outputs['pred_masks'] = outputs['pred_masks'][:,start_ind:end_ind]
 
+    if 'hs_embed' in outputs:
+        new_outputs['hs_embed'] = outputs['hs_embed'][:,start_ind:end_ind]
+
     if 'aux_outputs' in outputs:
 
         new_outputs['aux_outputs'] = [{} for _ in range(len(outputs['aux_outputs']))]

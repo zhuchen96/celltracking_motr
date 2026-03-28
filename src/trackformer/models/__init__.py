@@ -120,6 +120,9 @@ def build_model(args):
         weight_dict["main_loss_mask"] = args.mask_loss_coef
         weight_dict["main_loss_dice"] = args.dice_loss_coef
 
+    if getattr(args, 'contrastive_loss_coef', 0.0) > 0:
+        weight_dict['main_loss_contrastive'] = args.contrastive_loss_coef
+
     training_methods = []
     if args.dn_track:
         training_methods.append('dn_track')
@@ -169,6 +172,8 @@ def build_model(args):
     losses = ['labels', 'boxes']
     if args.masks:
         losses.append('masks')
+    if getattr(args, 'contrastive_loss_coef', 0.0) > 0:
+        losses.append('contrastive')
 
 
     criterion = SetCriterion(
