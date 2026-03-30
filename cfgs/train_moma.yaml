@@ -128,7 +128,8 @@ loss_coef: 1.0 # This is just a formality
 cls_loss_coef: 4.0 
 bbox_loss_coef: 5.0
 giou_loss_coef: 2.0
-contrastive_loss_coef: 0.1
+contrastive_loss_coef: 0.0  # set > 0 to enable contrastive embedding loss
+div_ahead_loss_coef: 1.0    # lookahead: predict division 1 frame before it happens
 pos_wei_loss_coef: 5.0
 dice_loss_coef: 5.0
 mask_loss_coef: 5.0

@@ -379,6 +379,16 @@ class DETRTrackingBase(nn.Module):
                 target['main'][target_name]['target_ind_matching'] = target_ind_match_matrix.any(dim=1)
                 target['main'][target_name]['track_query_match_ids'] = target_ind_match_matrix.nonzero()[:, 1]
 
+            # Division-ahead GT: 1 if the matched cur cell is dividing at this frame, 0 otherwise.
+            # Supervised at the prev frame so the model learns pre-division morphology 1 frame early.
+            match_ids = target['main'][target_name]['track_query_match_ids']
+            if len(match_ids) > 0:
+                target['main'][target_name]['track_query_div_ahead_gt'] = (
+                    target['main'][target_name]['labels'][match_ids, 1] == 1
+                ).float()
+            else:
+                target['main'][target_name]['track_query_div_ahead_gt'] = torch.tensor([], device=self.device)
+
             target['main'][target_name]['target_ind_matching'] = torch.cat([
                 target['main'][target_name]['target_ind_matching'],
                 torch.tensor([False, ] * target['main'][target_name]['num_FPs']).bool().to(self.device)

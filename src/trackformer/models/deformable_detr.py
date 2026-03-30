@@ -51,6 +51,9 @@ class DeformableDETR():
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 2)
         self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, 8, 3)
+        self.div_ahead_embed = nn.Linear(self.hidden_dim, 1)
+        nn.init.zeros_(self.div_ahead_embed.weight)
+        nn.init.zeros_(self.div_ahead_embed.bias)
         self.query_embed = nn.Embedding(num_queries, self.hidden_dim)
 
         # match interface with deformable DETR
@@ -365,6 +368,7 @@ class DeformableDETR():
         out = {'pred_logits': outputs_class[-1],
                'pred_boxes': outputs_bbox[-1],
                'hs_embed': hs[-1],
+               'pred_div_ahead': self.div_ahead_embed(hs[-1]).squeeze(-1),
                'references': reference_points,
                'training_methods': training_methods}
 

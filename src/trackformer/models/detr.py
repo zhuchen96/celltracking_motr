@@ -216,54 +216,69 @@ class SetCriterion(nn.Module):
         # print(time.time() - start)
 
         return losses
- 
-    def loss_contrastive(self, outputs, targets, training_method, target_name, indices, num_boxes):
-        """NT-Xent contrastive loss between prev-frame and cur-frame track embeddings.
 
-        For each true-positive track query, the prev-frame hs_embed (anchor) should be
-        pulled towards the cur-frame hs_embed (positive) and pushed away from other tracks.
-        Only computed for the 'main' method where embeddings are meaningful.
-        """
+    def loss_contrastive(self, outputs, targets, training_method, target_name, indices, num_boxes):
+        """NT-Xent contrastive loss on track embeddings. Disabled by default (contrastive_loss_coef=0)."""
         if training_method != 'main' or 'hs_embed' not in outputs:
             return {training_method + '_loss_contrastive': torch.tensor(0., device=self.device)}
 
-        hs = outputs['hs_embed']   # [B, N_track+N_obj, D]
+        hs = outputs['hs_embed']
         temperature = 0.1
         all_anchors, all_positives = [], []
 
         for i, target in enumerate(targets):
             tgt = target[training_method][target_name]
-            if tgt.get('empty', False):
+            if tgt.get('empty', False) or 'track_query_hs_embeds' not in tgt or 'track_queries_TP_mask' not in tgt:
                 continue
-            if 'track_query_hs_embeds' not in tgt or 'track_queries_TP_mask' not in tgt:
-                continue
-
             n_track = tgt['track_query_hs_embeds'].shape[0]
-            tp_track_mask = tgt['track_queries_TP_mask'][:n_track]   # [N_track]
+            tp_track_mask = tgt['track_queries_TP_mask'][:n_track]
             if tp_track_mask.sum() == 0:
                 continue
-
             tp_idx = tp_track_mask.nonzero(as_tuple=True)[0]
-            # detach anchors: gradients flow only through the current-frame positives
             all_anchors.append(tgt['track_query_hs_embeds'][tp_track_mask].detach())
             all_positives.append(hs[i, tp_idx])
 
         if len(all_anchors) == 0:
             return {training_method + '_loss_contrastive': torch.tensor(0., device=self.device)}
 
-        anchors   = F.normalize(torch.cat(all_anchors,   dim=0), dim=-1)  # [N, D]
-        positives = F.normalize(torch.cat(all_positives, dim=0), dim=-1)  # [N, D]
+        anchors   = F.normalize(torch.cat(all_anchors,   dim=0), dim=-1)
+        positives = F.normalize(torch.cat(all_positives, dim=0), dim=-1)
         N = anchors.shape[0]
-
         if N < 2:
             return {training_method + '_loss_contrastive': torch.tensor(0., device=self.device)}
 
-        # logits[i, j] = cosine similarity between anchor i and positive j
-        logits = torch.mm(anchors, positives.t()) / temperature   # [N, N]
+        logits = torch.mm(anchors, positives.t()) / temperature
         labels = torch.arange(N, device=self.device)
-        loss = F.cross_entropy(logits, labels)
+        return {training_method + '_loss_contrastive': F.cross_entropy(logits, labels)}
 
-        return {training_method + '_loss_contrastive': loss}
+    def loss_div_ahead(self, outputs, targets, training_method, target_name, indices, num_boxes):
+        """BCE loss: predict at prev frame whether each tracked cell will divide at cur frame."""
+        if training_method != 'main' or 'pred_div_ahead' not in outputs:
+            return {training_method + '_loss_div_ahead': torch.tensor(0., device=self.device)}
+
+        pred = outputs['pred_div_ahead']  # [B, N_track+N_obj]
+        all_pred, all_gt = [], []
+
+        for i, target in enumerate(targets):
+            tgt = target[training_method][target_name]
+            if tgt.get('empty', False) or 'track_query_div_ahead_gt' not in tgt or 'track_queries_TP_mask' not in tgt:
+                continue
+            if 'track_query_hs_embeds' not in tgt:
+                continue
+            n_track = tgt['track_query_hs_embeds'].shape[0]
+            tp_track_mask = tgt['track_queries_TP_mask'][:n_track]
+            if tp_track_mask.sum() == 0:
+                continue
+            tp_idx = tp_track_mask.nonzero(as_tuple=True)[0]
+            all_pred.append(pred[i, tp_idx])
+            all_gt.append(tgt['track_query_div_ahead_gt'])
+
+        if not all_pred:
+            return {training_method + '_loss_div_ahead': torch.tensor(0., device=self.device)}
+
+        pred_cat = torch.cat(all_pred)
+        gt_cat   = torch.cat(all_gt)
+        return {training_method + '_loss_div_ahead': F.binary_cross_entropy_with_logits(pred_cat, gt_cat)}
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
@@ -283,6 +298,7 @@ class SetCriterion(nn.Module):
             'boxes': self.loss_boxes,
             'masks': self.loss_masks,
             'contrastive': self.loss_contrastive,
+            'div_ahead': self.loss_div_ahead,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
 

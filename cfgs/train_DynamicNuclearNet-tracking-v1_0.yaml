@@ -128,7 +128,8 @@ loss_coef: 1.0 # This is just a formality
 cls_loss_coef: 4.0 
 bbox_loss_coef: 5.0
 giou_loss_coef: 2.0
-contrastive_loss_coef: 0.1
+contrastive_loss_coef: 0.0
+div_ahead_loss_coef: 1.0
 pos_wei_loss_coef: 5.0
 dice_loss_coef: 5.0
 mask_loss_coef: 5.0
@@ -184,5 +185,5 @@ display_all: False
 hooks: False
 avg_attn_weight_maps: True
 # MOTR-style Query Interaction Module
-use_qim: true
+use_qim: false
 num_qim_layers: 1

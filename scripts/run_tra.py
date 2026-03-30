@@ -19,7 +19,7 @@ import re
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-DATASET = "moma_qim"
+DATASET = "moma"
 
 # Number of digits used in sequence indices (e.g. 3 → 3-digit indices)
 N_DIGITS = 3

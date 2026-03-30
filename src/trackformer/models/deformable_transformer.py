@@ -76,6 +76,7 @@ class DeformableTransformer(nn.Module):
                 num_layers=num_qim_layers,
             )
 
+
         if self.refine_div_track_queries:
             self.div_track_embedding = nn.Embedding(2,self.d_model)
 
@@ -377,16 +378,10 @@ class DeformableTransformer(nn.Module):
             if self.refine_track_queries:
                 prev_hs_embed += self.track_embedding.weight
 
-            # MOTR: refine track queries by cross-attending to current-frame encoder memory
             if self.use_qim and prev_hs_embed.shape[1] > 0:
                 prev_hs_embed = self.qim(
-                    prev_hs_embed,
-                    prev_boxes[..., :4],
-                    memory,
-                    spatial_shapes,
-                    valid_ratios,
-                    level_start_index,
-                    mask_flatten,
+                    prev_hs_embed, prev_boxes[..., :4],
+                    memory, spatial_shapes, valid_ratios, level_start_index, mask_flatten,
                 )
 
             if not self.use_dab:
@@ -444,17 +439,12 @@ class DeformableTransformer(nn.Module):
                     prev_hs_embed_dn_track_group = torch.stack([t['dn_track_group'][output_target]['track_query_hs_embeds'] for t in targets])
                     prev_boxes_dn_track_group = torch.stack([t['dn_track_group'][output_target]['track_query_boxes'] for t in targets])
 
-                    # MOTR: refine dn_track_group queries (real hs embeds) via QIM
                     if self.use_qim and prev_hs_embed_dn_track_group.shape[1] > 0:
                         prev_hs_embed_dn_track_group = self.qim(
-                            prev_hs_embed_dn_track_group,
-                            prev_boxes_dn_track_group[..., :4],
-                            memory,
-                            spatial_shapes,
-                            valid_ratios,
-                            level_start_index,
-                            mask_flatten,
+                            prev_hs_embed_dn_track_group, prev_boxes_dn_track_group[..., :4],
+                            memory, spatial_shapes, valid_ratios, level_start_index, mask_flatten,
                         )
+
 
                     if not self.use_dab:
                         prev_hs_embed_dn_track_group = torch.zeros_like(prev_hs_embed_dn_track_group)
@@ -804,15 +794,26 @@ class DeformableTransformerDecoder(nn.Module):
         
         return output[None], reference_points[None], cls[None], bboxes[None]
 
+class QueryInteractionModule(nn.Module):
+    """MOTR-style Query Interaction Module (QIM). Disabled by default (use_qim=False)."""
+
+    def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points, num_layers):
+        super().__init__()
+        layer = QueryInteractionLayer(d_model, nhead, dim_feedforward, dropout, n_levels, n_points)
+        self.layers = _get_clones(layer, num_layers)
+
+    def forward(self, tgt, reference_points, memory, spatial_shapes, valid_ratios, level_start_index, memory_padding_mask=None):
+        output = tgt
+        for layer in self.layers:
+            if reference_points.shape[-1] == 4:
+                ref_pts = reference_points[:, :, None] * torch.cat([valid_ratios, valid_ratios], -1)[:, None]
+            else:
+                ref_pts = reference_points[:, :, None] * valid_ratios[:, None]
+            output = layer(output, ref_pts, memory, spatial_shapes, level_start_index, memory_padding_mask)
+        return output
+
+
 class QueryInteractionLayer(nn.Module):
-    """Single layer of MOTR's Query Interaction Module.
-
-    Refines track-query content embeddings by:
-      1. self-attention among track queries
-      2. deformable cross-attention with the current-frame encoder memory
-      3. feed-forward network
-    """
-
     def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
@@ -844,41 +845,6 @@ class QueryInteractionLayer(nn.Module):
         tgt = tgt + self.dropout4(tgt2)
         tgt = self.norm3(tgt)
         return tgt
-
-
-class QueryInteractionModule(nn.Module):
-    """MOTR-style Query Interaction Module (QIM).
-
-    Applied to track queries from the previous frame before they enter the main
-    decoder.  The QIM refines the track-query content embeddings by attending to
-    the current frame's encoder memory, giving each track query a head-start
-    that is aware of where the cell currently is — the key architectural
-    difference between MOTR and TrackFormer.
-    """
-
-    def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points, num_layers):
-        super().__init__()
-        layer = QueryInteractionLayer(d_model, nhead, dim_feedforward, dropout, n_levels, n_points)
-        self.layers = _get_clones(layer, num_layers)
-
-    def forward(self, tgt, reference_points, memory, spatial_shapes, valid_ratios, level_start_index, memory_padding_mask=None):
-        """
-        Args:
-            tgt: track query content embeddings  [B, N_track, d_model]
-            reference_points: box coordinates    [B, N_track, 4]  (cx,cy,w,h normalised)
-            memory: encoder output               [B, HW, d_model]
-            ...
-        Returns:
-            refined tgt of same shape
-        """
-        output = tgt
-        for layer in self.layers:
-            if reference_points.shape[-1] == 4:
-                ref_pts = reference_points[:, :, None] * torch.cat([valid_ratios, valid_ratios], -1)[:, None]
-            else:
-                ref_pts = reference_points[:, :, None] * valid_ratios[:, None]
-            output = layer(output, ref_pts, memory, spatial_shapes, level_start_index, memory_padding_mask)
-        return output
 
 
 class MLP(nn.Module):

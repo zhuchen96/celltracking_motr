@@ -96,8 +96,8 @@ def build_model(args):
             'use_img_for_mask': args.use_img_for_mask,
             'num_OD_layers': args.num_OD_layers,
             'use_div_box_as_ref_pts': args.use_div_box_as_ref_pts,
-            'use_qim': args.use_qim,
-            'num_qim_layers': args.num_qim_layers,}
+            'use_qim': getattr(args, 'use_qim', False),
+            'num_qim_layers': getattr(args, 'num_qim_layers', 1),}
 
         if args.tracking:
             if args.masks:
@@ -122,6 +122,9 @@ def build_model(args):
 
     if getattr(args, 'contrastive_loss_coef', 0.0) > 0:
         weight_dict['main_loss_contrastive'] = args.contrastive_loss_coef
+
+    if getattr(args, 'div_ahead_loss_coef', 0.0) > 0:
+        weight_dict['main_loss_div_ahead'] = args.div_ahead_loss_coef
 
     training_methods = []
     if args.dn_track:
@@ -174,6 +177,8 @@ def build_model(args):
         losses.append('masks')
     if getattr(args, 'contrastive_loss_coef', 0.0) > 0:
         losses.append('contrastive')
+    if getattr(args, 'div_ahead_loss_coef', 0.0) > 0:
+        losses.append('div_ahead')
 
 
     criterion = SetCriterion(
