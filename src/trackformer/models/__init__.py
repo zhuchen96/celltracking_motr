@@ -38,7 +38,8 @@ def build_model(args):
         'use_img_for_mask': args.use_img_for_mask,
         'masks': args.masks,
         'freeze_backbone': args.freeze_backbone,
-        'freeze_backbone_and_encoder': args.freeze_backbone_and_encoder,}
+        'freeze_backbone_and_encoder': args.freeze_backbone_and_encoder,
+        'use_temporal_memory': getattr(args, 'use_temporal_memory', False),}
     
     tracking_kwargs = {
         'matcher': matcher,
@@ -97,7 +98,9 @@ def build_model(args):
             'num_OD_layers': args.num_OD_layers,
             'use_div_box_as_ref_pts': args.use_div_box_as_ref_pts,
             'use_qim': getattr(args, 'use_qim', False),
-            'num_qim_layers': getattr(args, 'num_qim_layers', 1),}
+            'num_qim_layers': getattr(args, 'num_qim_layers', 1),
+            'temporal_dropout_prob': getattr(args, 'temporal_dropout_prob', 0.0),
+            'track_query_noise': getattr(args, 'track_query_noise', 0.0),}
 
         if args.tracking:
             if args.masks:

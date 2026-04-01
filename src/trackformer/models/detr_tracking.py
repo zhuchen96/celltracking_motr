@@ -501,6 +501,27 @@ class DETRTrackingBase(nn.Module):
                     boxes = self.separate_divided_cells(target,'main',target_name,boxes=boxes)
                 boxes = boxes[:,:4]
 
+            # Velocity-offset reference points: shift track query boxes by estimated
+            # cell velocity (prev_gt_pos - prev_prev_gt_pos) so the reference points
+            # start closer to where the cell will be in the current frame.
+            if (target_name == 'cur_target' and boxes.shape[0] > 0 and
+                    'prev_prev_target' in target['main'] and
+                    not target['main']['prev_prev_target'].get('empty', False)):
+                pprev_target = target['main']['prev_prev_target']
+                if 'track_ids' in pprev_target and len(pprev_target['track_ids']) > 0:
+                    pprev_ids = pprev_target['track_ids']
+                    # prev_track_ids contains the GT track IDs for the N tracked cells
+                    # prev_indices[1] indexes into prev_target GT boxes for those cells
+                    gt_prev_centers = target['main'][prev_target_name]['boxes'][prev_indices[1], :2]  # [N, 2]
+                    match_pprev = prev_track_ids.unsqueeze(1).eq(pprev_ids.unsqueeze(0))  # [N, M]
+                    has_pprev = match_pprev.any(1)  # [N]
+                    if has_pprev.any():
+                        pprev_idx = match_pprev.float().argmax(1)  # [N]
+                        gt_pprev_centers = pprev_target['boxes'][pprev_idx, :2]  # [N, 2]
+                        vel = torch.zeros_like(gt_prev_centers)
+                        vel[has_pprev] = gt_prev_centers[has_pprev] - gt_pprev_centers[has_pprev]
+                        boxes[:, :2] = (boxes[:, :2] + vel).clamp(0.0, 1.0)
+
             num_FPs = target['main'][target_name]['num_FPs']
             if num_FPs > 0:
                 FP_boxes, FP_hs = self.get_FP_boxes(target['main'],target_name,i,prev_out)

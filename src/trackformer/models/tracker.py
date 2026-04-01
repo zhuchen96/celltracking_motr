@@ -289,6 +289,12 @@ class Tracker:
             track_query_boxes = torch.stack([
                 t.pos for t in self.tracks + self.inactive_tracks], dim=0).cpu()
 
+            # Velocity-offset: extrapolate each track's position by its last displacement
+            for j, t in enumerate(self.tracks + self.inactive_tracks):
+                if len(t.last_pos) >= 2:
+                    vel = t.last_pos[-1] - t.last_pos[-2]
+                    track_query_boxes[j] = track_query_boxes[j] + vel
+
             track_query_boxes = box_xyxy_to_cxcywh(track_query_boxes)
             track_query_boxes = track_query_boxes / torch.tensor([
                 orig_size[0, 1], orig_size[0, 0],

@@ -33,9 +33,12 @@ class DeformableTransformer(nn.Module):
                  dn_enc_l1=0, dn_enc_l2=0, init_boxes_from_masks=False,
                  enc_masks=False,enc_FN=0,avg_attn_weight_maps=True,
                  tgt_noise=1e-6,use_img_for_mask=False, num_OD_layers=0,use_div_box_as_ref_pts=False,
-                 use_qim=False, num_qim_layers=1):
+                 use_qim=False, num_qim_layers=1,
+                 temporal_dropout_prob=0.0, track_query_noise=0.0):
         super().__init__()
 
+        self.temporal_dropout_prob = temporal_dropout_prob
+        self.track_query_noise = track_query_noise
         self.d_model = d_model
         self.batch_size = batch_size
         self.nhead = nhead
@@ -377,6 +380,21 @@ class DeformableTransformer(nn.Module):
 
             if self.refine_track_queries:
                 prev_hs_embed += self.track_embedding.weight
+
+            # Temporal dropout: randomly zero individual track query embeddings during
+            # training. Forces the model to detect/track without always relying on temporal
+            # context, improving generalization to occlusions and track starts.
+            if self.training and self.temporal_dropout_prob > 0.0 and prev_hs_embed.shape[1] > 0:
+                keep = torch.bernoulli(
+                    torch.ones(prev_hs_embed.shape[0], prev_hs_embed.shape[1], 1, device=self.device)
+                    * (1.0 - self.temporal_dropout_prob)
+                )
+                prev_hs_embed = prev_hs_embed * keep
+
+            # Track query noise: additive Gaussian noise on track embeddings during training.
+            # Simulates imperfect temporal signal (occlusion, identity confusion) at inference.
+            if self.training and self.track_query_noise > 0.0 and prev_hs_embed.shape[1] > 0:
+                prev_hs_embed = prev_hs_embed + torch.randn_like(prev_hs_embed) * self.track_query_noise
 
             if self.use_qim and prev_hs_embed.shape[1] > 0:
                 prev_hs_embed = self.qim(

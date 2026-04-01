@@ -27,9 +27,10 @@ class DeformableDETR():
     """ This is the Deformable DETR module that performs object detection """
     def __init__(self, tracking, backbone, num_classes, num_queries, num_feature_levels,device,
                  aux_loss=True, with_box_refine=False, two_stage=False, overflow_boxes=False,
-                 multi_frame_attention=False, use_dab=True, random_refpoints_xy=False, dn_object=False, 
+                 multi_frame_attention=False, use_dab=True, random_refpoints_xy=False, dn_object=False,
                  dn_object_FPs=False, dn_object_l1 = 0, dn_object_l2 = 0, refine_object_queries=False,
-                 share_bbox_layers=True,use_img_for_mask=False,masks=False,freeze_backbone=False,freeze_backbone_and_encoder=False):
+                 share_bbox_layers=True,use_img_for_mask=False,masks=False,freeze_backbone=False,
+                 freeze_backbone_and_encoder=False, use_temporal_memory=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -48,6 +49,15 @@ class DeformableDETR():
         self.device = device
         self.num_queries = num_queries
         self.hidden_dim = self.d_model
+
+        # Temporal Track Memory: per-dimension learnable gate that blends the current
+        # decoder output with the previous track embedding. This gives each track a
+        # persistent representation whose update rate is learned per feature dimension.
+        # Gate initialized to sigmoid(3) ≈ 0.95 so training starts near the current
+        # behavior (mostly trust current frame) and gradually learns temporal mixing.
+        self.use_temporal_memory = use_temporal_memory
+        if self.use_temporal_memory:
+            self.temporal_gate = nn.Parameter(torch.ones(self.hidden_dim) * 3.0)
         self.overflow_boxes = overflow_boxes
         self.class_embed = nn.Linear(self.hidden_dim, num_classes + 2)
         self.bbox_embed = MLP(self.hidden_dim, self.hidden_dim, 8, 3)
@@ -365,9 +375,25 @@ class DeformableDETR():
         hs, memory, reference_points, outputs_class, outputs_bbox, enc_outputs, training_methods, OD_outputs = \
             super().forward(features_all, src_list, mask_list, pos_list, query_embeds, targets, target_name, query_attn_mask, training_methods)
 
+        # Temporal Track Memory Gate: blend current decoder output with the stored
+        # previous track embedding. Each feature dimension has a learned mixing ratio.
+        # alpha[d] near 1 → trust current frame more (fast-changing features like position).
+        # alpha[d] near 0 → trust history more (slow-changing identity features).
+        hs_embed = hs[-1]
+        if self.use_temporal_memory and num_track_queries > 0 and targets is not None:
+            alpha = torch.sigmoid(self.temporal_gate)  # [D], values in (0,1)
+            hs_embed = hs[-1].clone()
+            for b, target in enumerate(targets):
+                t_dict = target.get('main', target)
+                t_cur = t_dict.get(target_name, t_dict)
+                if 'track_query_hs_embeds' in t_cur:
+                    prev_h = t_cur['track_query_hs_embeds']       # [N_t, D] - stored state
+                    curr_h = hs[-1][b, :prev_h.shape[0]]          # [N_t, D] - decoder output
+                    hs_embed[b, :prev_h.shape[0]] = alpha * curr_h + (1.0 - alpha) * prev_h
+
         out = {'pred_logits': outputs_class[-1],
                'pred_boxes': outputs_bbox[-1],
-               'hs_embed': hs[-1],
+               'hs_embed': hs_embed,
                'pred_div_ahead': self.div_ahead_embed(hs[-1]).squeeze(-1),
                'references': reference_points,
                'training_methods': training_methods}
