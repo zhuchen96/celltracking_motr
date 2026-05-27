@@ -107,7 +107,7 @@ def train(args: Namespace, datapath) -> None:
 @ex.config
 def my_config():
     res_name = res_names[0]  # Default dataset
-    dataset = 'moma'
+    dataset = 'deepcell'
 
 @ex.main
 def load_config(_config, _run):
@@ -117,8 +117,8 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     args = ex.run_commandline().config
 
-    res_name = "moma"
-    dataset = "moma"
+    res_name = "deepcell_modified"
+    dataset = "deepcell"
     respath = filepath.parents[1] / 'results' / res_name
 
     ex.add_config(str(respath / 'config.yaml'))

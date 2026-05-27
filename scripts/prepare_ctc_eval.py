@@ -22,8 +22,8 @@ import pathlib
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # Dataset name (must match folder names under results/ and data/)
-DATASET = "moma"
-
+DATASET = "deepcell"
+RESULT = "deepcell_original"
 # Sequences to process.  Use None to process ALL sequences found in the
 # results folder automatically, or list specific ones, e.g. ["01", "02", "05"]
 SEQUENCES = None  # e.g. ["01", "02"] or None for all
@@ -85,7 +85,7 @@ def prepare_sequence(seq: str, results_ctc_dir: pathlib.Path, data_ctc_test_dir:
 
 
 def main():
-    results_ctc_dir   = REPO_ROOT / "results" / DATASET / "test" / "CTC"
+    results_ctc_dir   = REPO_ROOT / "results" / RESULT / "test" / "CTC"
     data_ctc_test_dir = REPO_ROOT / "data" / DATASET / "CTC" / "test"
 
     if not results_ctc_dir.exists():

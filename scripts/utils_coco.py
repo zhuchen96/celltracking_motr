@@ -25,7 +25,7 @@ def get_info(dataset):
             'version': '1.0',
             'year': '2024'
             }
-    elif dataset == 'DynamicNuclearNet-tracking-v1_0':
+    elif dataset == 'deepcell':
         info = {
             'contributor': 'Van Valen Lab',
             'paper':'Caliban: Accurate cell tracking and lineage construction in live-cell imaging experiments with deep learning (2023 M. Schwartz et al.)',

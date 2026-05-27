@@ -19,7 +19,7 @@ import re
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-DATASET = "moma"
+DATASET = "deepcell_original"
 
 # Number of digits used in sequence indices (e.g. 3 → 3-digit indices)
 N_DIGITS = 3

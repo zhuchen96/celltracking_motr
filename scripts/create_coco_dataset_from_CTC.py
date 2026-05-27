@@ -7,7 +7,7 @@ import utils_coco as utils
 import re
 from skimage.measure import label
 
-dataset = 'sim' # ['moma','DynamicNuclearNet-tracking-v1_0']
+dataset = 'moma' # ['moma','DynamicNuclearNet-tracking-v1_0']
 datapath = Path('/srv/home/chen/Cell-TRACTR/data') / dataset / 'COCO'
 
 if dataset == 'moma':
@@ -31,15 +31,16 @@ categories = [{'id': 1, 'name': 'cell'}]
 info = utils.get_info(dataset)
 
 datapath.mkdir(exist_ok=True)
-folders = ['train','val']
+folders = ['test']
 utils.create_folders(datapath,folders)
 
 img_reader = utils.reader(dataset=dataset, target_size=target_size, resize=resize, min_area=min_area)
 
-train_sets = sorted([x for x in (datapath.parent / 'CTC' / 'train').iterdir() if x.is_dir() and re.findall('\d\d$',x.name)])
-val_sets = sorted([x for x in (datapath.parent / 'CTC' / 'val').iterdir() if x.is_dir() and re.findall('\d\d$',x.name)])
+#train_sets = sorted([x for x in (datapath.parent / 'CTC' / 'train').iterdir() if x.is_dir() and re.findall('\d\d$',x.name)])
+#val_sets = sorted([x for x in (datapath.parent / 'CTC' / 'val').iterdir() if x.is_dir() and re.findall('\d\d$',x.name)])
+test_sets = sorted([x for x in (datapath.parent / 'CTC' / 'test').iterdir() if x.is_dir() and re.findall('\d\d$',x.name)])
 
-for folder,dataset_paths in zip(folders,[train_sets,val_sets]):
+for folder,dataset_paths in zip(folders,[test_sets]):
     
     image_id = 0   
     images = []

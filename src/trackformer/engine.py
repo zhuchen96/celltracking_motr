@@ -587,8 +587,7 @@ class pipeline():
 
                 self.display_attn_maps(dec_attn_outputs)
 
-            if masks is not None:
-                ctc_data = self.save_ctc(ctc_data,masks)
+            ctc_data = self.save_ctc(ctc_data, masks)
 
             if i == 0:
                 self.display_two_stage(outputs)
@@ -628,10 +627,12 @@ class pipeline():
 
     def save_ctc(self,ctc_data,masks):
 
+        label_mask = np.zeros(self.img.shape[:2], dtype=np.uint16)
+
         if len(self.all_indices) > 0:
 
             label_mask = np.zeros(masks.shape[-2:],dtype=np.uint16)
-            
+
             for m, cell in enumerate(self.cells):
                 assert  masks[m].sum() > 0
                 label_mask[masks[m] > 0] = cell
