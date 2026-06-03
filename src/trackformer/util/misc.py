@@ -424,7 +424,9 @@ def display_loss(metrics_dict:dict,i,i_total,epoch,dataset):
 
     for key in metrics_dict.keys():
         if ('loss' in key and not bool(re.search('\d',key)) and key != 'lr') or 'CoMOT' in key:
-            display_loss[key] = f'{np.nan if np.isnan(metrics_dict[key][-1]).all() else np.nanmean(metrics_dict[key][-1]):.4f}'
+            if np.isnan(metrics_dict[key][-1]).all():
+                continue  # loss was never computed this epoch (intentionally skipped)
+            display_loss[key] = f'{np.nanmean(metrics_dict[key][-1]):.4f}'
 
     pad = int(math.log10(i_total))+1
     print(f'{dataset}  Epoch: {epoch} ({i:0{pad}}/{i_total-1})',display_loss)
@@ -1167,13 +1169,38 @@ def add_new_targets_from_main(targets,training_method,target_name):
 
 
 def plot_loss_and_metrics(datapath):
-    
+
     # Load pickle files with all the data on the losses and metrics
     with open(datapath / 'metrics_train.pkl', 'rb') as f:
         metrics_train = pickle.load(f)
 
     with open(datapath / 'metrics_val.pkl', 'rb') as f:
         metrics_val = pickle.load(f)
+
+    # Each GPU writes its own pkl entry per epoch, so collapse world_size consecutive
+    # entries into one real epoch by averaging. Read world_size from the saved config.
+    world_size = 1
+    config_path = datapath / 'config.yaml'
+    if config_path.exists():
+        import yaml
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        world_size = cfg.get('world_size', 1)
+
+    def collapse_epochs(metrics, ws):
+        if ws <= 1:
+            return metrics
+        out = {}
+        for k, v in metrics.items():
+            arr = np.array(v)
+            n = (arr.shape[0] // ws) * ws  # truncate to complete epochs
+            arr = arr[:n]
+            # reshape to (real_epochs, ws, ...) and average over GPU axis
+            out[k] = arr.reshape(n // ws, ws, *arr.shape[1:]).mean(axis=1)
+        return out
+
+    metrics_train = collapse_epochs(metrics_train, world_size)
+    metrics_val   = collapse_epochs(metrics_val,   world_size)
 
     # Separate the loss and metric data
     losses = [key for key in metrics_train.keys() if 'loss' in key and key != 'loss' and not bool(re.search('\d',key)) and not np.isnan(metrics_train[key]).all()]

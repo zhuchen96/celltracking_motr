@@ -142,6 +142,10 @@ class Joiner(nn.Sequential):
 
 
 def build_backbone(args):
+    if getattr(args, 'backbone', 'resnet50') == 'cellposesam':
+        from .cellposesam_backbone import build_cellposesam_backbone
+        return build_cellposesam_backbone(args)
+
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
     return_interm_layers = args.masks or (args.num_feature_levels > 1)

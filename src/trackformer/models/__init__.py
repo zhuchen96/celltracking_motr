@@ -2,10 +2,12 @@
 import torch
 
 from .backbone import build_backbone
+from .clip_matcher import build_clip_matcher
 from .deformable_detr import DeformableDETR
 from .detr import SetCriterion
 from .detr_segmentation import (DeformableDETRSegm, DeformableDETRSegmTracking)
 from .detr_tracking import DeformableDETRTracking
+from .motr_tracking import MOTRDeformableDETRTracking, MOTRDeformableDETRSegmTracking
 from .matcher import build_matcher
 
 
@@ -13,7 +15,9 @@ def build_model(args):
     num_classes = 1
     device = torch.device(args.device)
     backbone = build_backbone(args)
-    matcher = build_matcher(args)
+
+    use_motr = getattr(args, 'use_motr', False)
+    matcher = build_clip_matcher(args) if use_motr else build_matcher(args)
 
     detr_kwargs = {
         'tracking': args.tracking,
@@ -54,6 +58,13 @@ def build_model(args):
         'num_queries': args.num_queries,
         'dn_track_group': args.dn_track_group,
         'tgt_noise': args.tgt_noise}
+
+    if use_motr:
+        tracking_kwargs.update({
+            'memory_bank_len': getattr(args, 'memory_bank_len', 3),
+            'memory_bank_feedforward_dim': getattr(args, 'memory_bank_feedforward_dim', None),
+            'memory_bank_dropout': getattr(args, 'memory_bank_dropout', 0.1),
+        })
 
     mask_kwargs = {
         'freeze_detr': args.freeze_detr,
@@ -104,9 +115,15 @@ def build_model(args):
 
         if args.tracking:
             if args.masks:
-                model = DeformableDETRSegmTracking(mask_kwargs, tracking_kwargs, detr_kwargs,transformer_kwargs)
+                if use_motr:
+                    model = MOTRDeformableDETRSegmTracking(mask_kwargs, tracking_kwargs, detr_kwargs, transformer_kwargs)
+                else:
+                    model = DeformableDETRSegmTracking(mask_kwargs, tracking_kwargs, detr_kwargs, transformer_kwargs)
             else:
-                model = DeformableDETRTracking(tracking_kwargs, detr_kwargs, transformer_kwargs)
+                if use_motr:
+                    model = MOTRDeformableDETRTracking(tracking_kwargs, detr_kwargs, transformer_kwargs)
+                else:
+                    model = DeformableDETRTracking(tracking_kwargs, detr_kwargs, transformer_kwargs)
         else:
             if args.masks:
                 model = DeformableDETRSegm(mask_kwargs, detr_kwargs, transformer_kwargs)

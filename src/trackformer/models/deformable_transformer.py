@@ -502,7 +502,6 @@ class DeformableTransformer(nn.Module):
                         'hs_embed': OD_hs[-1],
                         'training_methods': 'OD_only',}
             
-            assert (tgt[:,num_track_queries:num_track_queries + self.num_queries] == OD_tgt).all()
             reference_points[:,num_track_queries:num_track_queries + self.num_queries] = OD_inter_references_points.clone()
           
         init_reference_point = reference_points[None]

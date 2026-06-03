@@ -95,7 +95,17 @@ def train_one_epoch(model: torch.nn.Module,
         if args.clip_max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_max_norm)
 
-        optimizer.step()
+        # Skip the update if any gradient is NaN (can happen with large losses on
+        # newly-initialised modules like MemoryBank).
+        has_nan_grad = any(
+            p.grad is not None and not torch.isfinite(p.grad).all()
+            for p in model.parameters()
+        )
+        if has_nan_grad:
+            print(f"WARNING: NaN/Inf in gradients at step {i}, skipping optimizer step")
+            optimizer.zero_grad()
+        else:
+            optimizer.step()
 
         if i == 0:
             lr = np.zeros((1,len(optimizer.param_groups)))

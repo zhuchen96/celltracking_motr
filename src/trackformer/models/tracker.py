@@ -33,6 +33,10 @@ class Tracker:
         self.reid_greedy_matching = tracker_cfg['reid_greedy_matching']
         self.prev_frame_dist = tracker_cfg['prev_frame_dist']
         self.steps_termination = tracker_cfg['steps_termination']
+        # MOTR MemoryBank inference support
+        from .motr_tracking import MOTRTrackingBase
+        self.use_motr = isinstance(obj_detector, MOTRTrackingBase)
+        self.memory_bank_len = getattr(obj_detector, 'memory_bank_len', 3) if self.use_motr else 0
 
         if self.generate_attention_maps:
             assert hasattr(self.obj_detector.transformer.decoder.layers[-1], 'multihead_attn'), 'Generation of attention maps not possible for deformable DETR.'
@@ -102,6 +106,7 @@ class Tracker:
                 indices[i],
                 None if masks is None else masks[i],
                 None if attention_maps is None else attention_maps[i],
+                memory_bank_len=self.memory_bank_len,
             ))
             new_track_ids.append(self.track_num + i)
         self.track_num += len(new_track_ids)
@@ -305,6 +310,19 @@ class Tracker:
             target['image_id'] = torch.tensor([1]).to(self.device)
             target['track_query_hs_embeds'] = torch.stack([
                 t.hs_embed[-1] for t in self.tracks + self.inactive_tracks], dim=0)
+
+            if self.use_motr and self.memory_bank_len > 0:
+                all_tracks = self.tracks + self.inactive_tracks
+                K = self.memory_bank_len
+                D = target['track_query_hs_embeds'].shape[-1]
+                bank = torch.zeros(len(all_tracks), K, D)
+                for j, t in enumerate(all_tracks):
+                    hist = list(t.hs_embed)  # oldest … newest, newest = hs_embed[-1]
+                    # exclude the last entry (that IS track_query_hs_embeds)
+                    past = hist[:-1]
+                    for k_off, emb in enumerate(reversed(past[:K])):
+                        bank[j, k_off] = emb.cpu()
+                target['track_memory_bank'] = bank
 
             target = {k: v.to(self.device) for k, v in target.items()}
             target = [target]
@@ -564,7 +582,7 @@ class Track(object):
     """This class contains all necessary for every individual track."""
 
     def __init__(self, pos, score, track_id, hs_embed, obj_ind,
-                 mask=None, attention_map=None):
+                 mask=None, attention_map=None, memory_bank_len=0):
         self.id = track_id
         self.pos = pos
         self.last_pos = deque([pos.clone()])
@@ -573,7 +591,10 @@ class Track(object):
         self.count_inactive = 0
         self.count_termination = 0
         self.gt_id = None
-        self.hs_embed = [hs_embed]
+        # Keep up to memory_bank_len+1 embeddings (oldest…newest); +1 so the
+        # current frame embedding is available alongside K past entries.
+        maxlen = (memory_bank_len + 1) if memory_bank_len > 0 else None
+        self.hs_embed = deque([hs_embed], maxlen=maxlen)
         self.mask = mask
         self.attention_map = attention_map
         self.obj_ind = obj_ind
