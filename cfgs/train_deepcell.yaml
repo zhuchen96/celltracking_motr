@@ -2,7 +2,7 @@ tracking: true
 freeze_backbone: false
 freeze_backbone_and_encoder: False
 lr: 0.0002
-lr_backbone_names: ['backbone.0']
+lr_backbone_names: ['backbone.0.trunk']
 lr_backbone: 0.00002
 lr_linear_proj_names: ['reference_points', 'sampling_offsets']
 lr_linear_proj_mult: 0.1
@@ -37,14 +37,14 @@ enc_n_points: 4
 freeze_detr: false
 load_mask_head_from_model: null
 # Backbone
-# Name of the convolutional backbone to use. ('resnet50', 'resnet101')
-backbone: resnet50
+# Name of the convolutional backbone to use. ('resnet50', 'resnet101', 'sam2')
+backbone: sam2
 # If true, we replace stride with dilation in the last convolutional block (DC5)
 dilation: false
 # Type of positional embedding to use on top of the image features. ('sine', 'learned')
 position_embedding: sine
 # Number of feature levels the encoder processes from the backbone
-num_feature_levels: 3
+num_feature_levels: 4
 # Transformer
 # Number of encoding layers in the transformer
 enc_layers: 4
@@ -154,17 +154,17 @@ dataset: deepcell
 num_plots: 10
 # Miscellaneous
 # path where to save, empty for no saving
-output_dir: /srv/home/chen/Cell-TRACTR/results/deepcell_motr_v2
+output_dir: /srv/home/chen/Cell-TRACTR/results/deepcell_sam2
 data_dir: /srv/home/chen/Cell-TRACTR/data
 # device to use for training / testing
 device: cuda
 seed: 42
 # resume from checkpoint
-resume: /srv/home/chen/Cell-TRACTR/results/deepcell_motr_stopped/checkpoint.pth
+resume: ''
 resume_shift_neuron: False
 # resume optimization from checkpoint
 resume_optim: true
-start_epoch: 10
+start_epoch: 1
 eval_only: false
 num_workers: 0
 val_interval: 5
@@ -173,7 +173,7 @@ debug: false
 save_model_interval: 5
 # distributed training parameters
 # number of distributed processes
-world_size: 3
+world_size: 2
 # url used to set up distributed training
 dist_url: env://
 cls_threshold: 0.5
@@ -197,3 +197,6 @@ memory_bank_len: 3
 cellposesam_checkpoint: /srv/home/chen/.cellpose/models/cpsam
 freeze_cellposesam_encoder: true
 unfreeze_cellposesam_blocks: 8
+# SAM2 Hiera backbone - set backbone: sam2 to use SAM2-L Hiera
+sam2_checkpoint: /path/to/.sam2/checkpoints/sam2.1_hiera_large.pt
+unfreeze_sam2_stages: 1

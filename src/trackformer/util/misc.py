@@ -1237,7 +1237,7 @@ def plot_loss_and_metrics(datapath):
     fig.savefig(datapath / 'loss_plot_overall.png')
 
     # Save the overall loss plot with log scale as well
-    ax.set_yscale('log')
+    ax.set_yscale('log', nonpositive='clip')
     plt.savefig(datapath / 'loss_plot_overall_log.png')
 
     # Plot the individual losses
@@ -1284,8 +1284,8 @@ def plot_loss_and_metrics(datapath):
 
     # Save individual loss plot with log axis as well
     for t in range(len(training_methods)):
-        ax[t,0].set_yscale('log')
-        ax[t,1].set_yscale('log')
+        ax[t,0].set_yscale('log', nonpositive='clip')
+        ax[t,1].set_yscale('log', nonpositive='clip')
 
     plt.savefig(datapath / 'loss_plot_log.png')
 

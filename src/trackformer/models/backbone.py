@@ -146,6 +146,10 @@ def build_backbone(args):
         from .cellposesam_backbone import build_cellposesam_backbone
         return build_cellposesam_backbone(args)
 
+    if getattr(args, 'backbone', 'resnet50') == 'sam2':
+        from .sam2_backbone import build_sam2_backbone
+        return build_sam2_backbone(args)
+
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
     return_interm_layers = args.masks or (args.num_feature_levels > 1)

@@ -117,7 +117,7 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     args = ex.run_commandline().config
 
-    res_name = "deepcell_modified"
+    res_name = "deepcell_motr_v2"
     dataset = "deepcell"
     respath = filepath.parents[1] / 'results' / res_name
 
