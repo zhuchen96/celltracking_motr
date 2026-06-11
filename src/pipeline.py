@@ -117,8 +117,8 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     args = ex.run_commandline().config
 
-    res_name = "deepcell_motr_v2"
-    dataset = "deepcell"
+    res_name = "moma_motr_v2"  # Default dataset
+    dataset = "moma"
     respath = filepath.parents[1] / 'results' / res_name
 
     ex.add_config(str(respath / 'config.yaml'))

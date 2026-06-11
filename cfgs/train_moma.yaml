@@ -9,7 +9,7 @@ lr_linear_proj_mult: 0.1
 lr_track: 0.0001
 overwrite_lrs: false
 overwrite_lr_scheduler: false
-batch_size: 2
+batch_size: 4
 weight_decay: 0.0001
 epochs: 12
 lr_drop: 11
@@ -129,7 +129,7 @@ cls_loss_coef: 4.0
 bbox_loss_coef: 5.0
 giou_loss_coef: 2.0
 contrastive_loss_coef: 0.0
-div_ahead_loss_coef: 1.0
+div_ahead_loss_coef: 0.0
 pos_wei_loss_coef: 5.0
 dice_loss_coef: 5.0
 mask_loss_coef: 5.0
@@ -154,7 +154,7 @@ dataset: moma
 num_plots: 10
 # Miscellaneous
 # path where to save, empty for no saving
-output_dir: /srv/home/chen/Cell-TRACTR/results/moma_motr
+output_dir: /srv/home/chen/Cell-TRACTR/results/moma_motr_v2
 data_dir: /srv/home/chen/Cell-TRACTR/data
 # device to use for training / testing
 device: cuda
@@ -166,14 +166,14 @@ resume_shift_neuron: False
 resume_optim: true
 start_epoch: 1
 eval_only: false
-num_workers: 0
+num_workers: 4
 val_interval: 5
 debug: false
 # epoch interval for model saving. if 0 only save last and best models
 save_model_interval: false
 # distributed training parameters
 # number of distributed processes
-world_size: 2
+world_size: 3
 # url used to set up distributed training
 dist_url: env://
 cls_threshold: 0.5
@@ -185,11 +185,11 @@ display_all: False
 hooks: False
 avg_attn_weight_maps: True
 # MOTR-style Query Interaction Module
-use_qim: true
+use_qim: false
 num_qim_layers: 1
-use_temporal_memory: true
+use_temporal_memory: false
 temporal_dropout_prob: 0.1
 track_query_noise: 0.02
 # MOTR MemoryBank - set use_motr: true to enable parallel MOTR model
 use_motr: true
-memory_bank_len: 3
+memory_bank_len: 1

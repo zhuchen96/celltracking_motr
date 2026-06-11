@@ -76,7 +76,6 @@ def train_one_epoch(model: torch.nn.Module,
         outputs, targets, _, _, _ = model(samples,targets)
 
         del _
-        torch.cuda.empty_cache()
 
         outputs, loss_dict = calc_loss_for_training_methods(outputs, targets, criterion)
         
@@ -145,16 +144,18 @@ def train_one_epoch(model: torch.nn.Module,
     return metrics_dict
 
 @torch.no_grad()
+@torch.no_grad()
 def evaluate(model, criterion, data_loader, args, epoch: int = None, interval=50):
 
     model.eval()
     criterion.eval()
+    model.train_model = True  # use teacher-forced multi-frame path, same as training
     dataset = 'val'
     ids = np.concatenate(([0],np.random.randint(0,len(data_loader),args.num_plots)))
 
     metrics_dict = {}
     for i, (samples, targets) in enumerate(data_loader):
-         
+
         samples = samples.to(args.device)
         targets = [utils.nested_dict_to_device(t, args.device) for t in targets]
 
@@ -469,6 +470,12 @@ class pipeline():
         self.max_cellnb = 0
         self.cells = np.zeros((0))
 
+        # MOTR: per-cell hs_embed history {cell_id: deque of tensors}
+        use_motr = getattr(self.args, 'use_motr', False)
+        motr_bank_len = getattr(self.args, 'memory_bank_len', 3)
+        from collections import deque
+        cell_hs_history = {}  # cell_id -> deque of past hs_embeds (oldest first)
+
         for i, fp in enumerate(tqdm(self.fps)):
 
             self.reset_vars()
@@ -480,10 +487,23 @@ class pipeline():
                 dec_attn_outputs = []
                 hooks = [self.model.decoder.layers[layer_index].self_attn.register_forward_hook(lambda self, input, output: dec_attn_outputs.append(output)) for layer_index in range(len(self.model.decoder.layers))]
 
+            # MOTR: inject memory bank into track queries before forward
+            if use_motr and motr_bank_len > 0:
+                cur = targets[0]['main']['cur_target']
+                if 'track_query_hs_embeds' in cur and cur['track_query_hs_embeds'].shape[0] > 0:
+                    prev_cells = self.cells  # cell ids for current track queries
+                    N, D = cur['track_query_hs_embeds'].shape
+                    bank = torch.zeros(N, motr_bank_len, D, device=self.device)
+                    for j, cell_id in enumerate(prev_cells):
+                        hist = cell_hs_history.get(int(cell_id), deque())
+                        for k_off, emb in enumerate(list(hist)[-motr_bank_len:]):
+                            bank[j, k_off] = emb
+                    cur['track_memory_bank'] = bank
+
             samples = self.preprocess_img(fp)
 
             with torch.no_grad():
-                outputs, targets, _, _, _ = self.model(samples,targets=targets)                
+                outputs, targets, _, _, _ = self.model(samples,targets=targets)
 
             pred_logits = outputs['pred_logits'][0].sigmoid().cpu().numpy()
 
@@ -515,8 +535,17 @@ class pipeline():
                     masks, boxes = self.post_process_masks(masks, boxes)
 
                 if self.track:
+                    new_hs = outputs['hs_embed'][0, self.all_indices]
                     # 'hs_embed' is used as the content embedding for the track queries
-                    targets[0]['main']['cur_target']['track_query_hs_embeds'] = outputs['hs_embed'][0,self.all_indices] # For div_indices, hs_embeds will be the same; no update
+                    targets[0]['main']['cur_target']['track_query_hs_embeds'] = new_hs  # For div_indices, hs_embeds will be the same; no update
+
+                    # MOTR: update per-cell hs history for surviving tracks
+                    if use_motr:
+                        for j, cell_id in enumerate(self.cells):
+                            cid = int(cell_id)
+                            if cid not in cell_hs_history:
+                                cell_hs_history[cid] = deque(maxlen=motr_bank_len)
+                            cell_hs_history[cid].append(new_hs[j].detach())
 
                     # 'track_query_boxes' are used as the positional embeddings for the track queries
                     # You can use the bounding box or mask as a positional embedding; default is to use the mask
@@ -611,8 +640,6 @@ class pipeline():
             if 'two_stage' in outputs:
                 self.save_enc_map(outputs,display_proposal_index_on_img)
 
-            torch.cuda.empty_cache()
-                
             if len(self.all_indices) == 0:
                 self.prevcells = None
 
@@ -629,7 +656,10 @@ class pipeline():
             np.savetxt(self.output_dir / 'res_track.txt',ctc_data,fmt='%d')
 
         if self.write_video:
-            self.save_video()
+            try:
+                self.save_video()
+            except Exception as e:
+                print(f'Warning: video saving failed ({e}), skipping.')
 
         if not self.two_stage:
             self.save_object_query_box_locations(outputs)

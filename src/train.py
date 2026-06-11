@@ -132,7 +132,9 @@ def train(respath, dataset) -> None:
         batch_sampler=batch_sampler_train,
         collate_fn=utils.collate_fn,
         num_workers=args.num_workers,
-        worker_init_fn=seed_worker)
+        worker_init_fn=seed_worker,
+        pin_memory=True,
+        prefetch_factor=2 if args.num_workers > 0 else None)
 
     data_loader_val = DataLoader(
         dataset_val, args.batch_size,
@@ -140,14 +142,15 @@ def train(respath, dataset) -> None:
         drop_last=False,
         collate_fn=utils.collate_fn,
         num_workers=args.num_workers,
-        worker_init_fn=seed_worker)
+        worker_init_fn=seed_worker,
+        pin_memory=True,
+        prefetch_factor=2 if args.num_workers > 0 else None)
 
     if args.resume:
         model_without_ddp = utils.load_model(model_without_ddp,args,param_dicts,optimizer,lr_scheduler)
 
     if args.eval_only:
-        raise NotImplementedError
-        evaluate(model, criterion, data_loader_val, device, args.output_dir, args, 0)
+        evaluate(model, criterion, data_loader_val, args, epoch=0)
         return
     
     assert args.start_epoch < args.epochs + 1
@@ -171,12 +174,11 @@ def train(respath, dataset) -> None:
         # VAL
         val_metrics = evaluate(model, criterion, data_loader_val,args, epoch)
 
-        # Save loss and metrics in a pickle file
-        utils.save_metrics_pkl(train_metrics,args.output_dir,'train',epoch=epoch)  
-        utils.save_metrics_pkl(val_metrics,args.output_dir,'val',epoch=epoch)  
-
-        # plot loss
-        utils.plot_loss_and_metrics(args.output_dir)
+        # Save loss and metrics in a pickle file (rank 0 only to avoid race + overwrite bug)
+        if utils.is_main_process():
+            utils.save_metrics_pkl(train_metrics,args.output_dir,'train',epoch=epoch)
+            utils.save_metrics_pkl(val_metrics,args.output_dir,'val',epoch=epoch)
+            utils.plot_loss_and_metrics(args.output_dir)
 
         checkpoint_paths = [args.output_dir / 'checkpoint.pth']
 

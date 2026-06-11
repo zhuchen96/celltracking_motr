@@ -148,18 +148,27 @@ class MOTRTrackingBase(DETRTrackingBase):
     # ------------------------------------------------------------------
 
     def _apply_memory_bank_inference(self, targets):
-        """Apply MemoryBank to flat inference target dicts (from Tracker.step)."""
+        """Apply MemoryBank to inference target dicts.
+
+        Handles both flat dicts (from Tracker.step) and the pipeline's nested
+        structure where track embeds live under target['main']['cur_target'].
+        """
         for target in targets:
-            if 'track_query_hs_embeds' not in target:
+            # Resolve to the dict that holds track_query_hs_embeds
+            if 'track_query_hs_embeds' in target:
+                cur = target
+            elif 'main' in target and 'track_query_hs_embeds' in target['main'].get('cur_target', {}):
+                cur = target['main']['cur_target']
+            else:
                 continue
-            hs = target['track_query_hs_embeds']
-            bank = target.get('track_memory_bank')
+            hs = cur['track_query_hs_embeds']
+            bank = cur.get('track_memory_bank')
             if bank is None or hs.shape[0] == 0:
                 continue
             hs_out = self.memory_bank_module(
                 hs.unsqueeze(0), bank.unsqueeze(0)
             ).squeeze(0)
-            target['track_query_hs_embeds'] = hs_out
+            cur['track_query_hs_embeds'] = hs_out
 
     # ------------------------------------------------------------------
     # Forward: inject prev_prev_hs for memory bank, handle inference

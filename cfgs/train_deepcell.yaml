@@ -13,7 +13,7 @@ batch_size: 1
 weight_decay: 0.0001
 epochs: 24
 lr_drop: 20
-target_size: (584,600)
+target_size: (576,600)
 # Number of object queries
 num_queries: 400
 # Flexible divisions
@@ -173,7 +173,7 @@ debug: false
 save_model_interval: 5
 # distributed training parameters
 # number of distributed processes
-world_size: 2
+world_size: 3
 # url used to set up distributed training
 dist_url: env://
 cls_threshold: 0.5
@@ -198,5 +198,5 @@ cellposesam_checkpoint: /srv/home/chen/.cellpose/models/cpsam
 freeze_cellposesam_encoder: true
 unfreeze_cellposesam_blocks: 8
 # SAM2 Hiera backbone - set backbone: sam2 to use SAM2-L Hiera
-sam2_checkpoint: /path/to/.sam2/checkpoints/sam2.1_hiera_large.pt
+sam2_checkpoint: /srv/home/chen/Cell-TRACTR/ckpt/sam2.1_hiera_large.pt
 unfreeze_sam2_stages: 1

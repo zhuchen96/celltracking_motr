@@ -1188,16 +1188,7 @@ def plot_loss_and_metrics(datapath):
         world_size = cfg.get('world_size', 1)
 
     def collapse_epochs(metrics, ws):
-        if ws <= 1:
-            return metrics
-        out = {}
-        for k, v in metrics.items():
-            arr = np.array(v)
-            n = (arr.shape[0] // ws) * ws  # truncate to complete epochs
-            arr = arr[:n]
-            # reshape to (real_epochs, ws, ...) and average over GPU axis
-            out[k] = arr.reshape(n // ws, ws, *arr.shape[1:]).mean(axis=1)
-        return out
+        return metrics
 
     metrics_train = collapse_epochs(metrics_train, world_size)
     metrics_val   = collapse_epochs(metrics_val,   world_size)
@@ -1215,6 +1206,9 @@ def plot_loss_and_metrics(datapath):
 
     # Get all the training methods used during training
     training_methods = [loss[:-8] for loss in losses if 'loss_ce' in loss]
+
+    if not training_methods:
+        return
 
     # Plot overall loss
     fig,ax = plt.subplots()
