@@ -5,14 +5,16 @@ Enable it via `use_motr: true` in the config.  All existing functionality
 (DN-track, DN-track-group, div_ahead, CoMOT, QIM, temporal-gate) is preserved
 since MOTRTrackingBase inherits from DETRTrackingBase.
 
-The single new component is the MemoryBank:
+The MemoryBank (SelfMOTR-enhanced):
   • Each active track query cross-attends to its K most recent decoder output
     embeddings from previous frames.
-  • Applied BEFORE QIM (if enabled) so history-enriched queries are then
-    further contextualized by the current encoder memory.
-  • During training (3-frame clip): K=1 bank entry from prev_prev frame.
-  • During inference: the Tracker maintains a rolling deque of K embeddings
-    per track and passes them as `track_memory_bank` in the target dict.
+  • mem_padding_mask [B, N, K] prevents empty bank slots from corrupting attention.
+  • save_thresh: only update a bank slot at inference when detection score > thresh.
+  • with_spatial_attn: optional spatial self-attention among current-frame tracks.
+
+SelfMOTR dual-query:
+  • use_dual_query: separate detection-only forward pass reusing cached encoder memory.
+  • Provides a cleaner detection loss signal decoupled from tracking queries.
 """
 
 from contextlib import nullcontext
@@ -45,9 +47,20 @@ class MOTRTrackingBase(DETRTrackingBase):
                  memory_bank_len: int = 3,
                  memory_bank_feedforward_dim: int = None,
                  memory_bank_dropout: float = 0.1,
+                 memory_bank_save_thresh: float = 0.0,
+                 memory_bank_spatial_attn: bool = False,
+                 use_dual_query: bool = False,
+                 num_queries_detect: int = 100,
+                 detect_score_thresh: float = 0.5,
+                 lambda_detect: float = 0.5,
                  **kwargs):
         super().__init__(**kwargs)
         self.memory_bank_len = memory_bank_len
+        self.memory_bank_save_thresh = memory_bank_save_thresh
+        self.use_dual_query = use_dual_query
+        self.num_queries_detect = num_queries_detect
+        self.detect_score_thresh = detect_score_thresh
+        self.lambda_detect = lambda_detect
         # hidden_dim is set by DeformableDETR.__init__ (called before this)
         ffn_dim = memory_bank_feedforward_dim or self.hidden_dim * 4
         self.memory_bank_module = MemoryBank(
@@ -56,7 +69,16 @@ class MOTRTrackingBase(DETRTrackingBase):
             dim_feedforward=ffn_dim,
             dropout=memory_bank_dropout,
             memory_len=memory_bank_len,
+            save_thresh=memory_bank_save_thresh,
+            with_spatial_attn=memory_bank_spatial_attn,
         )
+        if use_dual_query:
+            # Learnable embeddings for the detection-only auxiliary pass (SelfMOTR dual-query).
+            # query_embed_detect: content embeddings [Q, D]
+            # position_detect: raw reference points [Q, 4], applied .sigmoid() before use
+            self.query_embed_detect = nn.Embedding(num_queries_detect, self.hidden_dim)
+            self.position_detect = nn.Embedding(num_queries_detect, 4)
+            nn.init.uniform_(self.position_detect.weight.data, 0, 1)
 
     # ------------------------------------------------------------------
     # Training: build memory bank and enrich track queries
@@ -77,45 +99,47 @@ class MOTRTrackingBase(DETRTrackingBase):
             if hs.shape[0] == 0:
                 continue
 
-            bank = self._build_memory_bank_for_target(target, i, hs.shape[0], hs.shape[1])
+            bank, mask = self._build_memory_bank_for_target(target, i, hs.shape[0], hs.shape[1])
             if bank is None:
                 continue
 
+            # mem_padding_mask: [1, N, K] — True = empty slot
+            mem_pad = mask.unsqueeze(0) if mask is not None else None
             hs_out = self.memory_bank_module(
-                hs.unsqueeze(0), bank.unsqueeze(0)
+                hs.unsqueeze(0), bank.unsqueeze(0), mem_padding_mask=mem_pad
             ).squeeze(0)
             t_cur['track_query_hs_embeds'] = hs_out
 
     def _build_memory_bank_for_target(self, target, batch_idx, N, D):
-        """Return [N, 1, D] bank tensor from prev_prev frame, or None.
+        """Return (bank [N, K, D], mask [N, K]) from prev_prev frame embeddings, or (None, None).
 
-        Uses `_motr_prev_prev_hs` temporarily stored in target['main'] by the
-        overridden forward() before calling add_track_queries_to_targets.
+        mask[i, k] = True means slot k for track i is empty (padding).
+        Uses `_motr_prev_prev_hs` temporarily stored in target['main'].
         """
         pprev_hs_all = target['main'].get('_motr_prev_prev_hs')
         if pprev_hs_all is None:
-            return None
+            return None, None
 
         pprev_target = target['main'].get('prev_prev_target')
         if pprev_target is None:
-            return None
+            return None, None
 
         pprev_indices = pprev_target.get('indices')
         if pprev_indices is None:
-            return None
+            return None, None
         pprev_pred_idx, pprev_gt_idx = pprev_indices
         if len(pprev_pred_idx) == 0:
-            return None
+            return None, None
 
         pprev_ids = pprev_target.get('track_ids')
         if pprev_ids is None or len(pprev_ids) == 0:
-            return None
+            return None, None
 
         prev_target = target['main']['prev_target']
         cur_target = target['main']['cur_target']
         prev_ind = cur_target['prev_ind']
         if len(prev_ind[1]) == 0:
-            return None
+            return None, None
 
         pprev_hs = pprev_hs_all[batch_idx]  # [total_queries, D]
         dev = pprev_hs.device
@@ -126,7 +150,9 @@ class MOTRTrackingBase(DETRTrackingBase):
         pprev_ids = pprev_ids.to(dev)
         track_gt_ids = prev_target['track_ids'][prev_ind[1]].to(dev)
 
-        bank = torch.zeros(N, 1, D, device=dev)
+        K = self.memory_bank_len
+        bank = torch.zeros(N, K, D, device=dev)
+        mask = torch.ones(N, K, dtype=torch.bool, device=dev)  # True = empty
 
         for j in range(min(len(track_gt_ids), N)):
             gt_id = track_gt_ids[j]
@@ -140,8 +166,9 @@ class MOTRTrackingBase(DETRTrackingBase):
             pprev_pred_pos = pprev_pred_idx[pred_match[0, 0]]
             if pprev_pred_pos < pprev_hs.shape[0]:
                 bank[j, 0] = pprev_hs[pprev_pred_pos].detach()
+                mask[j, 0] = False  # slot 0 is valid
 
-        return bank  # [N, 1, D]
+        return bank, mask  # [N, K, D], [N, K]
 
     # ------------------------------------------------------------------
     # Inference: apply memory bank from tracker-maintained history
@@ -152,6 +179,7 @@ class MOTRTrackingBase(DETRTrackingBase):
 
         Handles both flat dicts (from Tracker.step) and the pipeline's nested
         structure where track embeds live under target['main']['cur_target'].
+        `track_memory_bank_mask` [N, K] bool tensor (True=empty) is optional.
         """
         for target in targets:
             # Resolve to the dict that holds track_query_hs_embeds
@@ -165,10 +193,46 @@ class MOTRTrackingBase(DETRTrackingBase):
             bank = cur.get('track_memory_bank')
             if bank is None or hs.shape[0] == 0:
                 continue
+            mask = cur.get('track_memory_bank_mask')  # [N, K] bool or None
+            mem_pad = mask.unsqueeze(0) if mask is not None else None
             hs_out = self.memory_bank_module(
-                hs.unsqueeze(0), bank.unsqueeze(0)
+                hs.unsqueeze(0), bank.unsqueeze(0), mem_padding_mask=mem_pad
             ).squeeze(0)
             cur['track_query_hs_embeds'] = hs_out
+
+    # ------------------------------------------------------------------
+    # Dual-query: detection-only pass reusing cached encoder memory
+    # ------------------------------------------------------------------
+
+    def _run_detect_pass(self, B: int):
+        """Run a detection-only decoder pass using the cached encoder memory.
+
+        Returns a dict with pred_logits and pred_boxes (and aux_outputs if aux_loss),
+        or None if not enabled or encoder cache is absent.
+        """
+        if not self.use_dual_query:
+            return None
+        if not hasattr(self, 'last_encoder_memory') or self.last_encoder_memory is None:
+            return None
+
+        tgt = self.query_embed_detect.weight.unsqueeze(0).expand(B, -1, -1)  # [B, Q, D]
+        ref_pts = self.position_detect.weight.sigmoid().unsqueeze(0).expand(B, -1, -1)  # [B, Q, 4]
+
+        # Decoder-only pass with cached encoder memory
+        hs, outputs_class, outputs_bbox = self.decode_from_cache(tgt, ref_pts)
+
+        # outputs_class/outputs_bbox are [L, B, Q, *] from the decoder
+        # outputs_bbox values are already inverse-sigmoid → sigmoid handled by the decoder
+        detect_out = {
+            'pred_logits': outputs_class[-1],
+            'pred_boxes': outputs_bbox[-1],
+        }
+        if self.aux_loss:
+            detect_out['aux_outputs'] = [
+                {'pred_logits': outputs_class[i], 'pred_boxes': outputs_bbox[i]}
+                for i in range(len(outputs_class) - 1)
+            ]
+        return detect_out
 
     # ------------------------------------------------------------------
     # Forward: inject prev_prev_hs for memory bank, handle inference
@@ -377,6 +441,11 @@ class MOTRTrackingBase(DETRTrackingBase):
 
         out['prev_outputs'] = prev_out
         out['prev_prev_outputs'] = prev_prev_out
+
+        # Dual-query: detection-only auxiliary pass using cached encoder memory
+        if self.use_dual_query:
+            B = samples.tensors.shape[0] if hasattr(samples, 'tensors') else len(samples)
+            out['detect_self_out'] = self._run_detect_pass(B)
 
         return out, targets, features, memory, hs
 

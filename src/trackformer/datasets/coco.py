@@ -77,9 +77,9 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         img_w_raw,img_h_raw = img_raw.size
         h,w = self.target_size[0].item(), self.target_size[1].item()
 
-        # Calculate padding
-        padding_width = max(self.target_size[1] - img_w_raw, 0)
-        padding_height = max(self.target_size[0] - img_h_raw, 0)
+        # Calculate padding (int() casts avoid PIL overflow when target_size elements are tensors)
+        padding_width = max(int(self.target_size[1]) - img_w_raw, 0)
+        padding_height = max(int(self.target_size[0]) - img_h_raw, 0)
 
         # Apply padding (left, top, right, bottom)
         img = Image.new('RGB', (img_w_raw + padding_width, img_h_raw + padding_height), (0, 0, 0))

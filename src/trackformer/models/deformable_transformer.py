@@ -34,11 +34,16 @@ class DeformableTransformer(nn.Module):
                  enc_masks=False,enc_FN=0,avg_attn_weight_maps=True,
                  tgt_noise=1e-6,use_img_for_mask=False, num_OD_layers=0,use_div_box_as_ref_pts=False,
                  use_qim=False, num_qim_layers=1,
-                 temporal_dropout_prob=0.0, track_query_noise=0.0):
+                 temporal_dropout_prob=0.0, track_query_noise=0.0,
+                 random_drop=0.0,
+                 qim_update_ref_pts=False, qim_score_thresh=0.5):
         super().__init__()
 
         self.temporal_dropout_prob = temporal_dropout_prob
         self.track_query_noise = track_query_noise
+        self.random_drop = random_drop
+        self.qim_update_ref_pts = qim_update_ref_pts
+        self.qim_score_thresh = qim_score_thresh
         self.d_model = d_model
         self.batch_size = batch_size
         self.nhead = nhead
@@ -77,6 +82,8 @@ class DeformableTransformer(nn.Module):
                 n_levels=num_feature_levels,
                 n_points=dec_n_points,
                 num_layers=num_qim_layers,
+                update_ref_pts=qim_update_ref_pts,
+                score_thresh=qim_score_thresh,
             )
 
 
@@ -283,7 +290,13 @@ class DeformableTransformer(nn.Module):
             level_start_index = torch.cat((spatial_shapes[:spatial_shapes.shape[0]].new_zeros((1, )), spatial_shapes[:spatial_shapes.shape[0]].prod(1).cumsum(0)[:-1]))
             memory = self.encoder(src_flatten, spatial_shapes, valid_ratios, level_start_index, lvl_pos_embed_flatten, mask_flatten)
 
-        self.spatial_shapes = spatial_shapes # needed for detr_segmentation.py
+        self.spatial_shapes = spatial_shapes  # needed for detr_segmentation.py
+        # Cache encoder memory for optional dual-query detect-only pass
+        self.last_encoder_memory = memory
+        self.last_spatial_shapes = spatial_shapes
+        self.last_level_start_index = level_start_index
+        self.last_valid_ratios = valid_ratios
+        self.last_mask_flatten = mask_flatten
 
         if self.masks:
             self.get_PEM(features,memory)
@@ -396,9 +409,26 @@ class DeformableTransformer(nn.Module):
             if self.training and self.track_query_noise > 0.0 and prev_hs_embed.shape[1] > 0:
                 prev_hs_embed = prev_hs_embed + torch.randn_like(prev_hs_embed) * self.track_query_noise
 
+            # SelfMOTR random_drop: zero entire track query slots with probability random_drop.
+            # Unlike temporal_dropout_prob (which zeros individual embedding dimensions),
+            # this drops whole tracks, training robustness to track-loss at inference.
+            if self.training and self.random_drop > 0.0 and prev_hs_embed.shape[1] > 0:
+                drop_mask = torch.bernoulli(
+                    torch.full((prev_hs_embed.shape[0], prev_hs_embed.shape[1]),
+                               self.random_drop, device=self.device)
+                ).bool()  # [B, N], True = dropped
+                prev_hs_embed[drop_mask] = 0.0
+                # Mark dropped tracks as FP so the loss treats them as background
+                if targets is not None:
+                    N_tq = prev_hs_embed.shape[1]
+                    for b, target in enumerate(targets):
+                        fpm = target['main'].get(output_target, {}).get('track_queries_fal_pos_mask')
+                        if fpm is not None:
+                            fpm[:N_tq] |= drop_mask[b]
+
             if self.use_qim and prev_hs_embed.shape[1] > 0:
-                prev_hs_embed = self.qim(
-                    prev_hs_embed, prev_boxes[..., :4],
+                prev_hs_embed, prev_boxes = self.qim(
+                    prev_hs_embed, prev_boxes,
                     memory, spatial_shapes, valid_ratios, level_start_index, mask_flatten,
                 )
 
@@ -458,8 +488,8 @@ class DeformableTransformer(nn.Module):
                     prev_boxes_dn_track_group = torch.stack([t['dn_track_group'][output_target]['track_query_boxes'] for t in targets])
 
                     if self.use_qim and prev_hs_embed_dn_track_group.shape[1] > 0:
-                        prev_hs_embed_dn_track_group = self.qim(
-                            prev_hs_embed_dn_track_group, prev_boxes_dn_track_group[..., :4],
+                        prev_hs_embed_dn_track_group, prev_boxes_dn_track_group = self.qim(
+                            prev_hs_embed_dn_track_group, prev_boxes_dn_track_group,
                             memory, spatial_shapes, valid_ratios, level_start_index, mask_flatten,
                         )
 
@@ -513,6 +543,34 @@ class DeformableTransformer(nn.Module):
         reference_points = torch.cat((init_reference_point,inter_references_points),axis=0)     
 
         return hs, memory, reference_points, outputs_class, outputs_bbox, enc_outputs, training_methods, OD_outputs
+
+    def decode_from_cache(self, tgt, reference_points):
+        """Run only the decoder using the cached encoder memory from the last forward pass.
+
+        Used by dual-query detect-self: reuses encoder output so we don't re-run the
+        expensive backbone + encoder for the detection-only auxiliary pass.
+
+        Args:
+            tgt:              [B, Q, D] content embeddings for detection queries
+            reference_points: [B, Q, 4] sigmoid reference points for detection queries
+        Returns:
+            hs:               [B, Q, D] decoder output
+            outputs_class:    [L, B, Q, C] aux class predictions across decoder layers
+            outputs_bbox:     [L, B, Q, 8] aux box predictions across decoder layers
+        """
+        memory         = self.last_encoder_memory
+        spatial_shapes = self.last_spatial_shapes
+        valid_ratios   = self.last_valid_ratios
+        level_start_index = self.last_level_start_index
+        mask_flatten   = self.last_mask_flatten
+
+        hs, _, outputs_class, outputs_bbox = self.decoder(
+            tgt, reference_points, memory,
+            spatial_shapes, valid_ratios, level_start_index,
+            query_pos=None, src_padding_mask=mask_flatten,
+        )
+        return hs, outputs_class, outputs_bbox
+
 
 class DeformableTransformerEncoderLayer(nn.Module):
     def __init__(self,
@@ -812,22 +870,43 @@ class DeformableTransformerDecoder(nn.Module):
         return output[None], reference_points[None], cls[None], bboxes[None]
 
 class QueryInteractionModule(nn.Module):
-    """MOTR-style Query Interaction Module (QIM). Disabled by default (use_qim=False)."""
+    """MOTR-style Query Interaction Module (QIM). Disabled by default (use_qim=False).
 
-    def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points, num_layers):
+    SelfMOTR QIMv2 additions:
+      - update_ref_pts: for high-confidence tracks, refine reference points using a
+        small MLP on the updated embedding delta, improving positional priors for t+1.
+      - score_thresh: confidence threshold above which ref_pts are updated.
+    """
+
+    def __init__(self, d_model, nhead, dim_feedforward, dropout, n_levels, n_points,
+                 num_layers, update_ref_pts=False, score_thresh=0.5):
         super().__init__()
         layer = QueryInteractionLayer(d_model, nhead, dim_feedforward, dropout, n_levels, n_points)
         self.layers = _get_clones(layer, num_layers)
+        self.update_ref_pts = update_ref_pts
+        self.score_thresh = score_thresh
+        if update_ref_pts:
+            # Projects refined embedding delta → box delta [cx, cy, w, h]
+            self.ref_pts_head = MLP(d_model, d_model, 4, 2)
 
-    def forward(self, tgt, reference_points, memory, spatial_shapes, valid_ratios, level_start_index, memory_padding_mask=None):
+    def forward(self, tgt, reference_points, memory, spatial_shapes, valid_ratios,
+                level_start_index, memory_padding_mask=None):
         output = tgt
+        ref_pts_4d = reference_points[..., :4]  # [B, N, 4]
         for layer in self.layers:
-            if reference_points.shape[-1] == 4:
-                ref_pts = reference_points[:, :, None] * torch.cat([valid_ratios, valid_ratios], -1)[:, None]
+            if ref_pts_4d.shape[-1] == 4:
+                ref_pts = ref_pts_4d[:, :, None] * torch.cat([valid_ratios, valid_ratios], -1)[:, None]
             else:
-                ref_pts = reference_points[:, :, None] * valid_ratios[:, None]
+                ref_pts = ref_pts_4d[:, :, None] * valid_ratios[:, None]
             output = layer(output, ref_pts, memory, spatial_shapes, level_start_index, memory_padding_mask)
-        return output
+
+        # QIMv2: refine reference points for high-confidence tracks
+        updated_boxes = reference_points.clone()
+        if self.update_ref_pts:
+            delta = self.ref_pts_head(output - tgt)           # embedding change → box delta
+            updated_boxes[..., :4] = (ref_pts_4d + delta).clamp(0.0, 1.0)
+
+        return output, updated_boxes
 
 
 class QueryInteractionLayer(nn.Module):

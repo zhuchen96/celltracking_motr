@@ -1194,7 +1194,7 @@ def plot_loss_and_metrics(datapath):
     metrics_val   = collapse_epochs(metrics_val,   world_size)
 
     # Separate the loss and metric data
-    losses = [key for key in metrics_train.keys() if 'loss' in key and key != 'loss' and not bool(re.search('\d',key)) and not np.isnan(metrics_train[key]).all()]
+    losses = [key for key in metrics_train.keys() if 'loss' in key and key != 'loss' and not bool(re.search('\d',key)) and not np.isnan(metrics_train[key]).all() and not key.startswith('detect_self')]
     metrics = [key for key in metrics_train.keys() if 'acc' in key and 'not_edge' not in key]
 
     # Get number of epochs (training and val should have same number of epochs but I have it separate so it won't create an error if that happens)
@@ -1205,7 +1205,7 @@ def plot_loss_and_metrics(datapath):
     num_layers = len(np.unique(np.array([int(re.findall('\d+',key)[0]) for key in metrics_train.keys() if bool(re.findall('\d+',key))])))
 
     # Get all the training methods used during training
-    training_methods = [loss[:-8] for loss in losses if 'loss_ce' in loss]
+    training_methods = [loss[:-8] for loss in losses if 'loss_ce' in loss and not loss.startswith('detect_self')]
 
     if not training_methods:
         return

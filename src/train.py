@@ -217,6 +217,10 @@ def load_config(_config, _run):
     sacred.commands.print_config(_run)
 
 if __name__ == '__main__':
+    # torch.distributed.launch injects --local-rank=N which Sacred doesn't know about
+    import sys
+    sys.argv = [a for a in sys.argv if not a.startswith('--local-rank') and not a.startswith('--local_rank')]
+
     # Parse the dataset from the command line
     args = ex.run_commandline().config
     dataset = 'moma'

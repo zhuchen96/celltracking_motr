@@ -57,13 +57,22 @@ def build_model(args):
         'use_prev_prev_frame': args.use_prev_prev_frame,
         'num_queries': args.num_queries,
         'dn_track_group': args.dn_track_group,
-        'tgt_noise': args.tgt_noise}
+        'tgt_noise': args.tgt_noise,
+        'selfmotr_fp_ratio': getattr(args, 'selfmotr_fp_ratio', 0.0),
+        'selfmotr_fp_score_thresh': getattr(args, 'selfmotr_fp_score_thresh', 0.3),
+    }
 
     if use_motr:
         tracking_kwargs.update({
             'memory_bank_len': getattr(args, 'memory_bank_len', 3),
             'memory_bank_feedforward_dim': getattr(args, 'memory_bank_feedforward_dim', None),
             'memory_bank_dropout': getattr(args, 'memory_bank_dropout', 0.1),
+            'memory_bank_save_thresh': getattr(args, 'memory_bank_save_thresh', 0.0),
+            'memory_bank_spatial_attn': getattr(args, 'memory_bank_spatial_attn', False),
+            'use_dual_query': getattr(args, 'use_dual_query', False),
+            'num_queries_detect': getattr(args, 'num_queries_detect', 100),
+            'detect_score_thresh': getattr(args, 'detect_score_thresh', 0.5),
+            'lambda_detect': getattr(args, 'lambda_detect', 0.5),
         })
 
     mask_kwargs = {
@@ -111,7 +120,11 @@ def build_model(args):
             'use_qim': getattr(args, 'use_qim', False),
             'num_qim_layers': getattr(args, 'num_qim_layers', 1),
             'temporal_dropout_prob': getattr(args, 'temporal_dropout_prob', 0.0),
-            'track_query_noise': getattr(args, 'track_query_noise', 0.0),}
+            'track_query_noise': getattr(args, 'track_query_noise', 0.0),
+            'random_drop': getattr(args, 'random_drop', 0.0),
+            'qim_update_ref_pts': getattr(args, 'qim_update_ref_pts', False),
+            'qim_score_thresh': getattr(args, 'qim_score_thresh', 0.5),
+        }
 
         if args.tracking:
             if args.masks:
@@ -191,6 +204,14 @@ def build_model(args):
     weight_dict.update(weight_dict_TM)
 
     weight_dict.update({'loss': args.loss_coef})
+
+    # Dual-query: detection-only auxiliary loss (SelfMOTR)
+    if use_motr and getattr(args, 'use_dual_query', False):
+        lambda_d = getattr(args, 'lambda_detect', 0.5)
+        detect_wd = {f'detect_self_{k.replace("main_","")}': v * lambda_d
+                     for k, v in weight_dict.items()
+                     if k.startswith('main_')}
+        weight_dict.update(detect_wd)
 
     losses = ['labels', 'boxes']
     if args.masks:

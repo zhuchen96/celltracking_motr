@@ -351,6 +351,8 @@ class SetCriterion(nn.Module):
                 self.sizes.append(len(target[training_method]['cur_target']['labels']))
     
         for loss in self.losses:
+            if (loss == 'masks' and 'pred_masks' not in outputs):
+                continue
             if sum(sizes) != 0 or (sum(sizes) == 0 and loss == 'labels'): # If two empty chambers, only loss will be computed for labels as there is nothing to computer for the boxes / masks
                 losses.update(self.get_loss(loss, outputs, targets, training_method, 'cur_target', indices, num_boxes))
 

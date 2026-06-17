@@ -49,7 +49,40 @@ def calc_loss_for_training_methods(outputs, targets, criterion):
 
     outputs_split['prev_outputs'] = outputs['prev_outputs']
     outputs_split['prev_prev_outputs'] = outputs['prev_prev_outputs']
-        
+
+    # Dual-query: detection-only auxiliary loss (SelfMOTR)
+    if 'detect_self_out' in outputs and outputs['detect_self_out'] is not None:
+        detect_out = outputs['detect_self_out']
+
+        # The matcher mutates target['main']['cur_target'] in place (it writes
+        # 'indices' and, for divided cells, swaps 'boxes'/'labels'/'masks').
+        # detect_out has no track queries, so matching it against the same
+        # dict the main pass already matched would clobber that state (which
+        # calc_track_acc reads afterwards) and would also misapply the main
+        # pass's track/division duplication logic to track-free queries.
+        # Match against an isolated copy instead.
+        detect_targets = []
+        for t in targets:
+            cur = t['main']['cur_target']
+            cur_copy = dict(cur)
+            cur_copy['boxes'] = cur['boxes'].clone()
+            cur_copy['labels'] = cur['labels'].clone()
+            if 'masks' in cur_copy:
+                cur_copy['masks'] = cur['masks'].clone()
+            cur_copy.pop('track_query_match_ids', None)
+            if 'track_queries_mask' in cur_copy:
+                cur_copy['track_queries_mask'] = torch.zeros_like(cur['track_queries_mask'])
+            if 'track_queries_TP_mask' in cur_copy:
+                cur_copy['track_queries_TP_mask'] = torch.zeros_like(cur['track_queries_TP_mask'])
+            if 'track_queries_fal_pos_mask' in cur_copy:
+                cur_copy['track_queries_fal_pos_mask'] = torch.zeros_like(cur['track_queries_fal_pos_mask'])
+            detect_targets.append({'main': {'cur_target': cur_copy}})
+
+        losses_detect = criterion(detect_out, detect_targets, {}, 'main')
+        losses.update({f'detect_self_{k.replace("main_","")}': v
+                       for k, v in losses_detect.items()
+                       if k.startswith('main_')})
+
     return outputs_split, losses
 
 def train_one_epoch(model: torch.nn.Module, 
@@ -358,7 +391,14 @@ class pipeline():
         N,_ = pred_logits.shape
         self.num_TQs = N - self.num_queries
 
-        keep = (pred_logits[:,0] > self.threshold)
+        obj_threshold = getattr(self.args, 'obj_threshold', self.threshold)
+        # Adaptive: lower obj_threshold gradually for late frames in long sequences
+        obj_thresh_decay = getattr(self.args, 'obj_thresh_decay', 0.0)
+        obj_threshold = max(obj_threshold - obj_thresh_decay * self.i, 0.3)
+        keep = np.concatenate([
+            pred_logits[:self.num_TQs, 0] > self.threshold,   # track queries: standard threshold
+            pred_logits[self.num_TQs:, 0] > obj_threshold,    # object queries: adaptive threshold
+        ])
         keep_div = (pred_logits[:,1] > self.threshold)
         keep_div[-self.num_queries:] = False # disregard any divisions predicted by object queries; model should have learned not to do this anyways
         keep_div[~keep] = False

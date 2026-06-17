@@ -11,7 +11,7 @@ overwrite_lrs: false
 overwrite_lr_scheduler: false
 batch_size: 4
 weight_decay: 0.0001
-epochs: 12
+epochs: 18
 lr_drop: 11
 target_size: (256,32)
 # Number of object queries
@@ -154,17 +154,17 @@ dataset: moma
 num_plots: 10
 # Miscellaneous
 # path where to save, empty for no saving
-output_dir: /srv/home/chen/Cell-TRACTR/results/moma_motr_v2
+output_dir: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v3
 data_dir: /srv/home/chen/Cell-TRACTR/data
 # device to use for training / testing
 device: cuda
 seed: 42
 # resume from checkpoint
-resume: ''
+resume: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v3/checkpoint.pth
 resume_shift_neuron: False
 # resume optimization from checkpoint
 resume_optim: true
-start_epoch: 1
+start_epoch: 6
 eval_only: false
 num_workers: 4
 val_interval: 5
@@ -178,6 +178,7 @@ world_size: 3
 dist_url: env://
 cls_threshold: 0.5
 iou_threshold: 0.5
+obj_threshold: 0.4
 # Data Viz
 data_viz: False
 # Data Viz - show all 
@@ -190,6 +191,20 @@ num_qim_layers: 1
 use_temporal_memory: false
 temporal_dropout_prob: 0.1
 track_query_noise: 0.02
+# SelfMOTR: whole-track dropout (random_drop) and QIM ref_pts update
+random_drop: 0.0
+qim_update_ref_pts: false
+qim_score_thresh: 0.5
+# SelfMOTR: score-based false positive injection
+selfmotr_fp_ratio: 0.0
+selfmotr_fp_score_thresh: 0.3
 # MOTR MemoryBank - set use_motr: true to enable parallel MOTR model
 use_motr: true
 memory_bank_len: 1
+memory_bank_save_thresh: 0.0
+memory_bank_spatial_attn: false
+# SelfMOTR dual-query: detection-only auxiliary pass
+use_dual_query: true
+num_queries_detect: 30
+detect_score_thresh: 0.5
+lambda_detect: 0.5

@@ -26,7 +26,9 @@ class DETRTrackingBase(nn.Module):
                  use_prev_prev_frame=False,
                  num_queries = 30,
                  dn_track_group = False,
-                 tgt_noise=1e-6):
+                 tgt_noise=1e-6,
+                 selfmotr_fp_ratio=0.0,
+                 selfmotr_fp_score_thresh=0.3):
 
         self._matcher = matcher
         self._backprop_prev_frame = backprop_prev_frame
@@ -45,6 +47,8 @@ class DETRTrackingBase(nn.Module):
 
         self.use_prev_prev_frame = use_prev_prev_frame
         self.flex_div = flex_div
+        self.selfmotr_fp_ratio = selfmotr_fp_ratio
+        self.selfmotr_fp_score_thresh = selfmotr_fp_score_thresh
 
         if self.dn_track:
             self.dn_track_embedding = nn.Embedding(1,self.hidden_dim)
@@ -80,10 +84,24 @@ class DETRTrackingBase(nn.Module):
         # Due to divisions, we do not want a repeat false positive which would occur with the current code below
 
         prev_out_ind_uni = torch.unique(target[target_name]['prev_ind'][0])
-        prev_out_ind_uni_all =  torch.unique(target[target_name]['prev_ind_orig'][0]) # we do not want add FPs where FNs are. 
+        prev_out_ind_uni_all =  torch.unique(target[target_name]['prev_ind_orig'][0]) # we do not want add FPs where FNs are.
 
         not_prev_out_ind = torch.randperm(prev_out['pred_boxes'].shape[1])
         not_prev_out_ind = [ind.item() for ind in not_prev_out_ind if ind not in prev_out_ind_uni_all]
+
+        # SelfMOTR fp_ratio: build a pool of low-confidence unmatched detections to use
+        # as hard FP embeddings, so the model learns to suppress near-threshold detections.
+        selfmotr_fp_pool = []
+        if self.selfmotr_fp_ratio > 0.0 and 'pred_logits' in prev_out and len(not_prev_out_ind) > 0:
+            logits = prev_out['pred_logits'][i].detach()  # [Q, C]
+            if logits.shape[-1] == 1:
+                scores = logits[..., 0].sigmoid()
+            else:
+                scores = logits.softmax(-1)[..., :-1].max(-1).values
+            for idx in not_prev_out_ind:
+                s = scores[idx].item()
+                if 0.05 < s < self.selfmotr_fp_score_thresh:
+                    selfmotr_fp_pool.append(idx)
 
         random_false_out_ind = []
         FP_boxes = []
@@ -108,7 +126,17 @@ class DETRTrackingBase(nn.Module):
                 random_ind = torch.randint(0,len(not_prev_out_ind),(1,))[0]
                 random_false_out_ind.append(int(not_prev_out_ind[random_ind]))
 
-            if j < len(prev_out_ind_uni) and target['training_method'] == 'main' and box.sum() > 0 and torch.rand(1) > 0.5:
+            # SelfMOTR: with probability fp_ratio, use a low-confidence unmatched detection
+            # embedding instead of random, training the model to suppress near-threshold FPs.
+            use_selfmotr_fp = (
+                self.selfmotr_fp_ratio > 0.0
+                and len(selfmotr_fp_pool) > 0
+                and torch.rand(1).item() < self.selfmotr_fp_ratio
+            )
+            if use_selfmotr_fp:
+                fp_src_idx = selfmotr_fp_pool[j % len(selfmotr_fp_pool)]
+                FPs_hs.append(prev_out['hs_embed'][i, fp_src_idx].detach().clone())
+            elif j < len(prev_out_ind_uni) and target['training_method'] == 'main' and box.sum() > 0 and torch.rand(1) > 0.5:
                 FP_hs = prev_out['hs_embed'][i, prev_out_ind_uni[j]].detach().clone()
                 FP_hs = torch.normal(0,0.25,size=FP_hs.shape,device=self.device) + FP_hs
                 FPs_hs.append(FP_hs)
