@@ -154,17 +154,17 @@ dataset: moma
 num_plots: 10
 # Miscellaneous
 # path where to save, empty for no saving
-output_dir: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v3
+output_dir: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v5
 data_dir: /srv/home/chen/Cell-TRACTR/data
 # device to use for training / testing
 device: cuda
 seed: 42
 # resume from checkpoint
-resume: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v3/checkpoint.pth
+resume: ''
 resume_shift_neuron: False
 # resume optimization from checkpoint
-resume_optim: true
-start_epoch: 6
+resume_optim: false
+start_epoch: 0
 eval_only: false
 num_workers: 4
 val_interval: 5

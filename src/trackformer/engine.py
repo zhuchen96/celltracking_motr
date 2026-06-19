@@ -65,10 +65,43 @@ def calc_loss_for_training_methods(outputs, targets, criterion):
         for t in targets:
             cur = t['main']['cur_target']
             cur_copy = dict(cur)
-            cur_copy['boxes'] = cur['boxes'].clone()
-            cur_copy['labels'] = cur['labels'].clone()
-            if 'masks' in cur_copy:
-                cur_copy['masks'] = cur['masks'].clone()
+
+            # Only supervise detect-self queries on NEW cells (not tracked from prev frame).
+            # Removing tracked cells prevents training the shared heads to fire on
+            # already-tracked cells, which would create FP ghost tracks at inference.
+            #
+            # Use track_query_match_ids (preferred): set by add_track_queries_to_targets
+            # AFTER update_target expands division boxes, so indices are always current.
+            # Fall back to prev_ind[1] only if track_query_match_ids is absent (shouldn't
+            # happen for track=True frames, but guard anyway).
+            tqm = cur.get('track_query_match_ids')
+            prev_ind = cur.get('prev_ind')
+            if tqm is not None and len(tqm) > 0:
+                tracked = set(tqm.tolist())
+            elif prev_ind is not None and len(prev_ind[1]) > 0:
+                tracked = set(prev_ind[1].tolist())
+            else:
+                tracked = set()
+            n = cur['boxes'].shape[0]
+            if tracked:
+                new_mask = torch.tensor(
+                    [i not in tracked for i in range(n)],
+                    dtype=torch.bool, device=cur['boxes'].device)
+            else:
+                new_mask = torch.ones(n, dtype=torch.bool, device=cur['boxes'].device)
+
+            cur_copy['boxes'] = cur['boxes'][new_mask].clone()
+            cur_copy['labels'] = cur['labels'][new_mask].clone()
+            if 'masks' in cur and cur['masks'] is not None:
+                m = cur['masks']
+                if m.ndim == 4 and m.shape[0] == n:
+                    # Normal case: [N_cells, 2, H, W] — filter to new cells
+                    cur_copy['masks'] = m[new_mask].clone()
+                else:
+                    # Edge case: masks stored as [H, 2, W] (single/empty frame),
+                    # shape doesn't align with boxes N — skip mask supervision
+                    cur_copy.pop('masks', None)
+
             cur_copy.pop('track_query_match_ids', None)
             if 'track_queries_mask' in cur_copy:
                 cur_copy['track_queries_mask'] = torch.zeros_like(cur['track_queries_mask'])

@@ -117,7 +117,7 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     args = ex.run_commandline().config
 
-    res_name = "moma_selfmotr_v3"  # Default dataset
+    res_name = "moma_selfmotr_v5"  # Default dataset
     dataset = "moma"
     respath = filepath.parents[1] / 'results' / res_name
 

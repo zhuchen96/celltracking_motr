@@ -23,7 +23,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # Dataset name (must match folder names under results/ and data/)
 DATASET = "moma"
-RESULT = "moma_selfmotr_v3"
+RESULT = "moma_selfmotr_v5"
 # Sequences to process.  Use None to process ALL sequences found in the
 # results folder automatically, or list specific ones, e.g. ["01", "02", "05"]
 SEQUENCES = None  # e.g. ["01", "02"] or None for all
