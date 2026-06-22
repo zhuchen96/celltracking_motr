@@ -19,7 +19,7 @@ import re
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-DATASET = "moma_selfmotr_v5"  # Must match folder names under results/ and data/
+DATASET = "moma_selfmotr_v8"  # Must match folder names under results/ and data/
 
 # Number of digits used in sequence indices (e.g. 3 → 3-digit indices)
 N_DIGITS = 3

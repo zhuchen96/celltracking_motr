@@ -117,8 +117,7 @@ def load_config(_config, _run):
 if __name__ == '__main__':
     args = ex.run_commandline().config
 
-    res_name = "moma_selfmotr_v5"  # Default dataset
-    dataset = "moma"
+    res_name = "moma_selfmotr_v8"  # ← change this to switch models
     respath = filepath.parents[1] / 'results' / res_name
 
     ex.add_config(str(respath / 'config.yaml'))
@@ -127,6 +126,6 @@ if __name__ == '__main__':
 
     args.output_dir = Path(args.output_dir)
     args.data_dir = Path(args.data_dir)
-    datapath = args.data_dir / dataset / 'CTC' / 'test'
+    datapath = args.data_dir / args.dataset / 'CTC' / 'test'
 
     train(args,datapath)

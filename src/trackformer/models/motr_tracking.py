@@ -17,6 +17,7 @@ SelfMOTR dual-query:
   • Provides a cleaner detection loss signal decoupled from tracking queries.
 """
 
+import copy
 from contextlib import nullcontext
 
 import numpy as np
@@ -79,6 +80,16 @@ class MOTRTrackingBase(DETRTrackingBase):
             self.query_embed_detect = nn.Embedding(num_queries_detect, self.hidden_dim)
             self.position_detect = nn.Embedding(num_queries_detect, 4)
             nn.init.uniform_(self.position_detect.weight.data, 0, 1)
+
+            # Dedicated class and box prediction heads for the detect-self pass.
+            # These are separate from the shared tracking heads so the detect loss
+            # does not pull the tracking heads toward "fire on all cells" behaviour.
+            # One head per decoder layer (decoder.num_layers, not counting OD layers).
+            n_dec = self.decoder.num_layers
+            self.detect_class_embed = nn.ModuleList(
+                [copy.deepcopy(self.class_embed[0]) for _ in range(n_dec)])
+            self.detect_bbox_embed = nn.ModuleList(
+                [copy.deepcopy(self.bbox_embed[0]) for _ in range(n_dec)])
 
     # ------------------------------------------------------------------
     # Training: build memory bank and enrich track queries
@@ -207,6 +218,9 @@ class MOTRTrackingBase(DETRTrackingBase):
     def _run_detect_pass(self, B: int):
         """Run a detection-only decoder pass using the cached encoder memory.
 
+        Uses dedicated detect_class_embed / detect_bbox_embed heads (not the shared
+        tracking heads) so the detect-self loss does not affect tracking predictions.
+
         Returns a dict with pred_logits and pred_boxes (and aux_outputs if aux_loss),
         or None if not enabled or encoder cache is absent.
         """
@@ -218,19 +232,23 @@ class MOTRTrackingBase(DETRTrackingBase):
         tgt = self.query_embed_detect.weight.unsqueeze(0).expand(B, -1, -1)  # [B, Q, D]
         ref_pts = self.position_detect.weight.sigmoid().unsqueeze(0).expand(B, -1, -1)  # [B, Q, 4]
 
-        # Decoder-only pass with cached encoder memory
-        hs, outputs_class, outputs_bbox = self.decode_from_cache(tgt, ref_pts)
+        # Decoder-only pass; hs: [L, B, Q, D] — one entry per decoder layer.
+        # outputs_class / outputs_bbox from the decoder use shared tracking heads;
+        # we discard them and apply dedicated detect heads to the raw hs instead.
+        hs, _, _ = self.decode_from_cache(tgt, ref_pts)
 
-        # outputs_class/outputs_bbox are [L, B, Q, *] from the decoder
-        # outputs_bbox values are already inverse-sigmoid → sigmoid handled by the decoder
+        # Apply dedicated heads per decoder layer
+        det_cls  = [self.detect_class_embed[lid](hs[lid])  for lid in range(len(hs))]
+        det_bbox = [self.detect_bbox_embed[lid](hs[lid]).sigmoid() for lid in range(len(hs))]
+
         detect_out = {
-            'pred_logits': outputs_class[-1],
-            'pred_boxes': outputs_bbox[-1],
+            'pred_logits': det_cls[-1],
+            'pred_boxes':  det_bbox[-1],
         }
         if self.aux_loss:
             detect_out['aux_outputs'] = [
-                {'pred_logits': outputs_class[i], 'pred_boxes': outputs_bbox[i]}
-                for i in range(len(outputs_class) - 1)
+                {'pred_logits': det_cls[i], 'pred_boxes': det_bbox[i]}
+                for i in range(len(hs) - 1)
             ]
         return detect_out
 

@@ -129,14 +129,14 @@ cls_loss_coef: 4.0
 bbox_loss_coef: 5.0
 giou_loss_coef: 2.0
 contrastive_loss_coef: 0.0
-div_ahead_loss_coef: 0.0
+div_ahead_loss_coef: 2.0
 pos_wei_loss_coef: 5.0
 dice_loss_coef: 5.0
 mask_loss_coef: 5.0
 mask_weight_target_cell_coef: 2.0
 mask_weight_all_cells_coef: 10.0
-div_loss_coef: 5.0 
-track_div_loss_coef: 2.0
+div_loss_coef: 15.0
+track_div_loss_coef: 8.0
 dn_object_coef: 1.0
 dn_track_coef: 1.0
 FN_det_query_loss_coef: 2.0
@@ -154,13 +154,13 @@ dataset: moma
 num_plots: 10
 # Miscellaneous
 # path where to save, empty for no saving
-output_dir: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v5
+output_dir: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v8
 data_dir: /srv/home/chen/Cell-TRACTR/data
 # device to use for training / testing
 device: cuda
 seed: 42
 # resume from checkpoint
-resume: ''
+resume: /srv/home/chen/Cell-TRACTR/results/moma_selfmotr_v7/checkpoint.pth
 resume_shift_neuron: False
 # resume optimization from checkpoint
 resume_optim: false
@@ -173,7 +173,7 @@ debug: false
 save_model_interval: false
 # distributed training parameters
 # number of distributed processes
-world_size: 3
+world_size: 1
 # url used to set up distributed training
 dist_url: env://
 cls_threshold: 0.5
@@ -199,7 +199,7 @@ qim_score_thresh: 0.5
 selfmotr_fp_ratio: 0.0
 selfmotr_fp_score_thresh: 0.3
 # MOTR MemoryBank - set use_motr: true to enable parallel MOTR model
-use_motr: true
+use_motr: false
 memory_bank_len: 1
 memory_bank_save_thresh: 0.0
 memory_bank_spatial_attn: false

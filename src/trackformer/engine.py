@@ -428,11 +428,19 @@ class pipeline():
         # Adaptive: lower obj_threshold gradually for late frames in long sequences
         obj_thresh_decay = getattr(self.args, 'obj_thresh_decay', 0.0)
         obj_threshold = max(obj_threshold - obj_thresh_decay * self.i, 0.3)
+        # In datasets where all new cells come from divisions (e.g. moma),
+        # object queries after frame 0 produce only FPs.  This flag disables them.
+        first_frame_only_obj = getattr(self.args, 'first_frame_only_obj_queries', False)
+        if first_frame_only_obj and self.i > 0:
+            obj_keep = np.zeros(self.num_queries, dtype=bool)
+        else:
+            obj_keep = pred_logits[self.num_TQs:, 0] > obj_threshold
         keep = np.concatenate([
             pred_logits[:self.num_TQs, 0] > self.threshold,   # track queries: standard threshold
-            pred_logits[self.num_TQs:, 0] > obj_threshold,    # object queries: adaptive threshold
+            obj_keep,                                          # object queries
         ])
-        keep_div = (pred_logits[:,1] > self.threshold)
+        div_threshold = getattr(self.args, 'div_threshold', self.threshold)
+        keep_div = (pred_logits[:,1] > div_threshold)
         keep_div[-self.num_queries:] = False # disregard any divisions predicted by object queries; model should have learned not to do this anyways
         keep_div[~keep] = False
             
